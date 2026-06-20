@@ -1,0 +1,15 @@
+<svg viewBox="0 0 240 200" xmlns="http://www.w3.org/2000/svg">
+  <g transform="translate(120, 145)">
+    <path d="M -95 0 A 95 95 0 0 1 95 0" fill="none" stroke="#E53935" stroke-width="2" stroke-linecap="round" stroke-dasharray="2 5" opacity="0.5"/>
+  </g>
+  <g transform="translate(120, 145)" stroke="#E53935" stroke-width="1.5" stroke-linecap="round">
+    <line x1="-80" y1="-6" x2="-80" y2="0" opacity="0.6"/>
+    <line x1="-40" y1="-10" x2="-40" y2="-4" opacity="0.6"/>
+    <line x1="0"   y1="-12" x2="0"   y2="-6" opacity="0.6"/>
+    <line x1="40"  y1="-10" x2="40"  y2="-4" opacity="0.6"/>
+    <line x1="80"  y1="-6"  x2="80"  y2="0"  opacity="0.6"/>
+  </g>
+  <text x="120" y="128" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="54" font-weight="500" fill="#f9fafb">Motor<tspan fill="#E53935">Ph</tspan></text>
+  <circle cx="120" cy="157" r="3" fill="#E53935"/>
+  <text x="120" y="176" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="9" fill="#9ca3af">EST  ·  PHILIPPINES</text>
+</svg>
