@@ -70,7 +70,7 @@ goto fail
 :execute
 @rem Setup the command line
 
-set CLASSPATH=%APP_HOME%\lib\app.jar;%APP_HOME%\lib\guava-33.2.1-jre.jar;%APP_HOME%\lib\mssql-jdbc-12.4.2.jre11.jar;%APP_HOME%\lib\opencsv-5.9.jar;%APP_HOME%\lib\svg-salamander-1.0.jar;%APP_HOME%\lib\jbcrypt-0.4.jar;%APP_HOME%\lib\flatlaf-3.7.1.jar;%APP_HOME%\lib\failureaccess-1.0.2.jar;%APP_HOME%\lib\listenablefuture-9999.0-empty-to-avoid-conflict-with-guava.jar;%APP_HOME%\lib\jsr305-3.0.2.jar;%APP_HOME%\lib\checker-qual-3.42.0.jar;%APP_HOME%\lib\error_prone_annotations-2.26.1.jar;%APP_HOME%\lib\commons-text-1.11.0.jar;%APP_HOME%\lib\commons-lang3-3.13.0.jar;%APP_HOME%\lib\commons-beanutils-1.9.4.jar;%APP_HOME%\lib\commons-collections4-4.4.jar;%APP_HOME%\lib\commons-logging-1.2.jar;%APP_HOME%\lib\commons-collections-3.2.2.jar
+set CLASSPATH=%APP_HOME%\lib\app.jar;%APP_HOME%\lib\guava-33.2.1-jre.jar;%APP_HOME%\lib\mssql-jdbc-12.4.2.jre11.jar;%APP_HOME%\lib\opencsv-5.9.jar;%APP_HOME%\lib\svg-salamander-1.0.jar;%APP_HOME%\lib\jbcrypt-0.4.jar;%APP_HOME%\lib\flatlaf-3.7.1.jar;%APP_HOME%\lib\openpdf-3.0.5.jar;%APP_HOME%\lib\failureaccess-1.0.2.jar;%APP_HOME%\lib\listenablefuture-9999.0-empty-to-avoid-conflict-with-guava.jar;%APP_HOME%\lib\jsr305-3.0.2.jar;%APP_HOME%\lib\checker-qual-3.42.0.jar;%APP_HOME%\lib\error_prone_annotations-2.26.1.jar;%APP_HOME%\lib\commons-text-1.11.0.jar;%APP_HOME%\lib\commons-lang3-3.13.0.jar;%APP_HOME%\lib\commons-beanutils-1.9.4.jar;%APP_HOME%\lib\commons-collections4-4.4.jar;%APP_HOME%\lib\brotli4j-1.23.0.jar;%APP_HOME%\lib\commons-logging-1.2.jar;%APP_HOME%\lib\commons-collections-3.2.2.jar;%APP_HOME%\lib\service-1.23.0.jar
 
 
 @rem Execute app

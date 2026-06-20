@@ -1,5 +1,6 @@
 package Processes;
 
+import Core.Service.PayrollCalculator;
 import DataAccess.AllowanceDAO;
 import DataAccess.AttendanceDAO;
 import DataAccess.DatabaseConnector;
@@ -19,8 +20,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-
-import Core.Service.PayrollCalculator;
 
 /**
  * Payroll period-run engine: orchestration + persistence only.
@@ -92,8 +91,11 @@ public class PayrollProcess implements IPayrollProcess {
    * @return the PayrollPeriodID used (existing open period reused, else created)
    */
   @Override
-  public long RunPeriod(PayrollPeriod period, LocalDate asOf, long generatedByUserId)
-    throws SQLException {
+  public long RunPeriod(
+    PayrollPeriod period,
+    LocalDate asOf,
+    long generatedByUserId
+  ) throws SQLException {
     boolean secondCutoff = IsSecondCutoff(period);
 
     // --- Phase 1: compute (reads only) -------------------------------------
@@ -101,7 +103,11 @@ public class PayrollProcess implements IPayrollProcess {
     List<EmpDetail> employees = employeeDAO.GetAll();
 
     try (Connection readConn = DatabaseConnector.GetConnection()) {
-      IStatutoryRates rates = new StatutoryRateProvider(statRateDAO, readConn, asOf);
+      IStatutoryRates rates = new StatutoryRateProvider(
+        statRateDAO,
+        readConn,
+        asOf
+      );
 
       for (EmpDetail emp : employees) {
         // Relies on vw_EmployeeCompleteDetails.Status -> EmpDetail.IsActive().
@@ -110,10 +116,15 @@ public class PayrollProcess implements IPayrollProcess {
         }
 
         // Allowances are the only thing the view doesn't carry.
-        emp.SetAllowances(allowanceDAO.GetByEmployeeID(readConn, emp.GetEmployeeId()));
+        emp.SetAllowances(
+          allowanceDAO.GetByEmployeeID(readConn, emp.GetEmployeeId())
+        );
 
         List<Attendance> logs = attendanceDAO.GetByDateRange(
-          emp.GetEmployeeId(), period.GetStartDate(), period.GetEndDate()
+          readConn,
+          emp.GetEmployeeId(),
+          period.GetStartDate(),
+          period.GetEndDate()
         );
         WorkedHoursSummary hours = calculator.CalculateHoursWorked(logs);
 
@@ -127,15 +138,29 @@ public class PayrollProcess implements IPayrollProcess {
         }
 
         EmpDeductions deductions = calculator.ComputeEmployeeDeductions(
-          emp.GetCompensation(), hours, secondCutoff, rates
+          emp.GetCompensation(),
+          hours,
+          secondCutoff,
+          rates
         );
         EmpPaySlip slip = calculator.GenerateEmpPaySlip(
-          emp, emp.GetCompensation(),
-          period.GetStartDate(), period.GetEndDate(), hours, deductions
+          emp,
+          emp.GetCompensation(),
+          period.GetStartDate(),
+          period.GetEndDate(),
+          hours,
+          deductions
         );
 
-        Payslip header = calculator.ToPayslipSnapshot(emp, slip, deductions, hours);
-        results.add(new ComputedPayroll(header, emp.GetAllowances(), deductions));
+        Payslip header = calculator.ToPayslipSnapshot(
+          emp,
+          slip,
+          deductions,
+          hours
+        );
+        results.add(
+          new ComputedPayroll(header, emp.GetAllowances(), deductions)
+        );
       }
     }
 
@@ -146,16 +171,32 @@ public class PayrollProcess implements IPayrollProcess {
 
       for (ComputedPayroll cp : results) {
         cp.header.SetPayrollPeriodId(periodId);
-        if (payrollDAO.GetByEmployeeAndPeriod(conn, cp.header.GetEmployeeId(), periodId) != null) {
+        if (
+          payrollDAO.GetByEmployeeAndPeriod(
+            conn,
+            cp.header.GetEmployeeId(),
+            periodId
+          ) !=
+          null
+        ) {
           continue; // already has a slip for this period (idempotent re-run)
         }
 
-        long payslipId = payrollDAO.SavePayslip(conn, cp.header, generatedByUserId);
+        long payslipId = payrollDAO.SavePayslip(
+          conn,
+          cp.header,
+          generatedByUserId
+        );
 
         if (cp.header.GetTotalAllowances() > 0) {
           SaveAllowanceLines(conn, payslipId, cp.allowances);
         }
-        SaveStatutoryDeductionLines(conn, payslipId, cp.deductions, deductionTypeIds);
+        SaveStatutoryDeductionLines(
+          conn,
+          payslipId,
+          cp.deductions,
+          deductionTypeIds
+        );
       }
       return periodId;
     });
@@ -203,7 +244,8 @@ public class PayrollProcess implements IPayrollProcess {
   // =========================================================================
 
   /** DeductionName -> DeductionTypeID, loaded once per run. */
-  private Map<String, Integer> LoadDeductionTypeIds(Connection conn) throws SQLException {
+  private Map<String, Integer> LoadDeductionTypeIds(Connection conn)
+    throws SQLException {
     Map<String, Integer> map = new HashMap<>();
     for (DeductionTypeInfo t : deductionDAO.GetAllTypes(conn)) {
       map.put(t.GetDeductionName(), t.GetDeductionTypeId());
@@ -212,8 +254,11 @@ public class PayrollProcess implements IPayrollProcess {
   }
 
   /** One Payroll_Allowance row per allowance, at the per-cutoff (halved) amount. */
-  private void SaveAllowanceLines(Connection conn, long payslipId, List<AllowanceInfo> allowances)
-    throws SQLException {
+  private void SaveAllowanceLines(
+    Connection conn,
+    long payslipId,
+    List<AllowanceInfo> allowances
+  ) throws SQLException {
     if (allowances == null) {
       return;
     }
@@ -223,7 +268,11 @@ public class PayrollProcess implements IPayrollProcess {
         continue;
       }
       payrollDAO.SavePayrollAllowance(
-        conn, payslipId, a.GetAllowanceTypeId(), perCutoff, "Semi-monthly share"
+        conn,
+        payslipId,
+        a.GetAllowanceTypeId(),
+        perCutoff,
+        "Semi-monthly share"
       );
     }
   }
@@ -236,10 +285,38 @@ public class PayrollProcess implements IPayrollProcess {
     Map<String, Integer> typeIds
   ) throws SQLException {
     int src = PayrollDeductionSource.STATUTORY.getValue();
-    WriteStatutoryLine(conn, payslipId, typeIds, DT_SSS, d.GetSssContribution(), src);
-    WriteStatutoryLine(conn, payslipId, typeIds, DT_PHILHEALTH, d.GetPhilHealthContribution(), src);
-    WriteStatutoryLine(conn, payslipId, typeIds, DT_PAGIBIG, d.GetPagIbigContribution(), src);
-    WriteStatutoryLine(conn, payslipId, typeIds, DT_WITHHOLDING, d.GetWithholdingTax(), src);
+    WriteStatutoryLine(
+      conn,
+      payslipId,
+      typeIds,
+      DT_SSS,
+      d.GetSssContribution(),
+      src
+    );
+    WriteStatutoryLine(
+      conn,
+      payslipId,
+      typeIds,
+      DT_PHILHEALTH,
+      d.GetPhilHealthContribution(),
+      src
+    );
+    WriteStatutoryLine(
+      conn,
+      payslipId,
+      typeIds,
+      DT_PAGIBIG,
+      d.GetPagIbigContribution(),
+      src
+    );
+    WriteStatutoryLine(
+      conn,
+      payslipId,
+      typeIds,
+      DT_WITHHOLDING,
+      d.GetWithholdingTax(),
+      src
+    );
   }
 
   private void WriteStatutoryLine(
@@ -256,13 +333,20 @@ public class PayrollProcess implements IPayrollProcess {
     Integer typeId = typeIds.get(deductionName);
     if (typeId == null) {
       System.err.println(
-        "PayrollProcess: Deduction_Type '" + deductionName +
-        "' is not seeded; skipping its line item."
+        "PayrollProcess: Deduction_Type '" +
+          deductionName +
+          "' is not seeded; skipping its line item."
       );
       return;
     }
     payrollDAO.SavePayrollDeduction(
-      conn, payslipId, typeId, sourceType, null, Round2(amount), null
+      conn,
+      payslipId,
+      typeId,
+      sourceType,
+      null,
+      Round2(amount),
+      null
     );
   }
 
@@ -289,8 +373,11 @@ public class PayrollProcess implements IPayrollProcess {
       ) {
         if (existing.IsLocked()) {
           throw new IllegalStateException(
-            "Payroll period '" + existing.GetPeriodName() + "' is " +
-            existing.GetPayrollStatus() + " and cannot be regenerated."
+            "Payroll period '" +
+              existing.GetPeriodName() +
+              "' is " +
+              existing.GetPayrollStatus() +
+              " and cannot be regenerated."
           );
         }
         return existing.GetPayrollPeriodId();
@@ -309,11 +396,16 @@ public class PayrollProcess implements IPayrollProcess {
 
   /** Bundles one employee's computed header + line-item inputs across phases. */
   private static final class ComputedPayroll {
+
     final Payslip header;
     final List<AllowanceInfo> allowances; // monthly amounts; halved when persisted
     final EmpDeductions deductions;
 
-    ComputedPayroll(Payslip header, List<AllowanceInfo> allowances, EmpDeductions deductions) {
+    ComputedPayroll(
+      Payslip header,
+      List<AllowanceInfo> allowances,
+      EmpDeductions deductions
+    ) {
       this.header = header;
       this.allowances = allowances;
       this.deductions = deductions;
@@ -335,13 +427,19 @@ public class PayrollProcess implements IPayrollProcess {
       return result;
     } catch (SQLException | RuntimeException e) {
       if (conn != null) {
-        try { conn.rollback(); } catch (SQLException ignore) {}
+        try {
+          conn.rollback();
+        } catch (SQLException ignore) {}
       }
       throw e;
     } finally {
       if (conn != null) {
-        try { conn.setAutoCommit(true); } catch (SQLException ignore) {}
-        try { conn.close(); } catch (SQLException ignore) {}
+        try {
+          conn.setAutoCommit(true);
+        } catch (SQLException ignore) {}
+        try {
+          conn.close();
+        } catch (SQLException ignore) {}
       }
     }
   }

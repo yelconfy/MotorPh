@@ -4,6 +4,8 @@ import Objects.enums.Status.PayrollPeriodStatus;
 import Objects.enums.Status.PayslipStatus;
 import Objects.models.PayrollPeriod;
 import Objects.models.Payslip;
+import Objects.models.PayslipAllowanceLine;
+import Objects.models.PayslipDeductionLine;
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
@@ -262,6 +264,87 @@ public class PayrollDAO {
       pstmt.setLong(1, employeeId);
       try (ResultSet rs = pstmt.executeQuery()) {
         while (rs.next()) list.add(new Payslip(rs));
+      }
+    }
+    return list;
+  }
+
+  /**
+   * GetById — single payslip header by PayslipID, with display JOINs.
+   * Used by the print flow to fetch the frozen header before its line items.
+   */
+  public Payslip GetById(Connection conn, long payslipId) throws SQLException {
+  String sql =
+    "SELECT ps.*, e.FirstName, e.LastName, " +
+    "       pp.PeriodName, pp.StartDate, pp.EndDate, " +
+    "       pos.PositionName, dep.DepartmentName, " +
+    "       sal.BasicSalary AS MonthlyRate, sal.HourlyRate " +
+    "FROM Payslip ps " +
+    "JOIN Employees e        ON e.EmployeeID       = ps.EmployeeID " +
+    "JOIN Payroll_Period pp  ON pp.PayrollPeriodID = ps.PayrollPeriodID " +
+    "LEFT JOIN Positions pos   ON pos.PositionID   = e.PositionID " +
+    "LEFT JOIN Departments dep ON dep.DepartmentID = e.DepartmentID " +
+    "OUTER APPLY ( " +
+    "  SELECT TOP 1 s.BasicSalary, s.HourlyRate " +
+    "  FROM EmployeeSalary s " +
+    "  WHERE s.EmployeeID = ps.EmployeeID " +
+    "    AND s.EffectiveDate <= pp.EndDate " +     // period-accurate: rate as of the slip's period
+    "  ORDER BY s.EffectiveDate DESC " +
+    ") sal " +
+    "WHERE ps.PayslipID = ?";
+
+  try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+    pstmt.setLong(1, payslipId);
+    try (ResultSet rs = pstmt.executeQuery()) {
+      return rs.next() ? new Payslip(rs) : null;
+    }
+  }
+}
+
+  // =========================================================================
+  // Line-item reads (for itemized payslip printing)
+  // =========================================================================
+
+  /** Allowance lines for one payslip, joined to Allowance_Type for the name. */
+  public List<PayslipAllowanceLine> GetAllowanceLines(Connection conn, long payslipId)
+    throws SQLException {
+    List<PayslipAllowanceLine> list = new ArrayList<>();
+    String sql =
+      "SELECT pa.PayrollAllowanceID, pa.PayslipID, pa.AllowanceTypeID, " +
+      "       t.AllowanceName, pa.Amount, pa.Remarks " +
+      "FROM Payroll_Allowance pa " +
+      "JOIN Allowance_Type t ON t.AllowanceTypeID = pa.AllowanceTypeID " +
+      "WHERE pa.PayslipID = ? " +
+      "ORDER BY t.AllowanceName";
+
+    try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+      pstmt.setLong(1, payslipId);
+      try (ResultSet rs = pstmt.executeQuery()) {
+        while (rs.next()) list.add(new PayslipAllowanceLine(rs));
+      }
+    }
+    return list;
+  }
+
+  /**
+   * Deduction lines for one payslip, joined to Deduction_Type for the name.
+   * Ordered by Category (statutory first) then name, matching payslip layout.
+   */
+  public List<PayslipDeductionLine> GetDeductionLines(Connection conn, long payslipId)
+    throws SQLException {
+    List<PayslipDeductionLine> list = new ArrayList<>();
+    String sql =
+      "SELECT pd.PayrollDeductionID, pd.PayslipID, pd.DeductionTypeID, " +
+      "       t.DeductionName, pd.SourceType, pd.Amount, pd.Remarks " +
+      "FROM Payroll_Deduction pd " +
+      "JOIN Deduction_Type t ON t.DeductionTypeID = pd.DeductionTypeID " +
+      "WHERE pd.PayslipID = ? " +
+      "ORDER BY t.Category, t.DeductionName";
+
+    try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+      pstmt.setLong(1, payslipId);
+      try (ResultSet rs = pstmt.executeQuery()) {
+        while (rs.next()) list.add(new PayslipDeductionLine(rs));
       }
     }
     return list;

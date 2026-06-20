@@ -20,7 +20,8 @@ SELECT v.Code, v.Name
 FROM (VALUES
     ('PAYROLL',     'Payroll'),
     ('EMPMGMT',     'Employee Management'),
-    ('TIMEKEEPING', 'Timekeeping')
+    ('TIMEKEEPING', 'Timekeeping'),
+    ('PAYSLIP',     'Payslip Register')
 ) AS v(Code, Name)
 WHERE NOT EXISTS (SELECT 1 FROM Module m WHERE m.ModuleCode = v.Code);
 GO
@@ -35,7 +36,9 @@ GO
 -- 3. Seed Role_Permission grants
 --    Mapping (by RoleCode -> ModuleCode -> PermissionCode):
 --      PR (Payroll Officer) -> PAYROLL     : VIEW, EDIT, APPROVE
+--      PR (Payroll Officer) -> PAYSLIP     : VIEW
 --      HR (HR Admin)        -> EMPMGMT     : VIEW, ADD, EDIT, DELETE
+--      HR (HR Admin)        -> PAYSLIP     : VIEW
 --      TK (Timekeeper)      -> TIMEKEEPING : VIEW
 --    Resolved to IDs via code lookups so it survives any IDENTITY values.
 WITH Grants (RoleCode, ModuleCode, PermissionCode) AS (
@@ -43,10 +46,12 @@ WITH Grants (RoleCode, ModuleCode, PermissionCode) AS (
         ('PR', 'PAYROLL',     'VIEW'),
         ('PR', 'PAYROLL',     'EDIT'),
         ('PR', 'PAYROLL',     'APPROVE'),
+        ('PR', 'PAYSLIP',     'VIEW'),
         ('HR', 'EMPMGMT',     'VIEW'),
         ('HR', 'EMPMGMT',     'ADD'),
         ('HR', 'EMPMGMT',     'EDIT'),
         ('HR', 'EMPMGMT',     'DELETE'),
+        ('HR', 'PAYSLIP',     'VIEW'),
         ('TK', 'TIMEKEEPING', 'VIEW')
     ) AS g(RoleCode, ModuleCode, PermissionCode)
 )

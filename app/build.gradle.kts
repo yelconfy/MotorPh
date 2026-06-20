@@ -16,6 +16,7 @@ dependencies {
     implementation("com.kitfox.svg:svg-salamander:1.0")
     implementation("org.mindrot:jbcrypt:0.4")
     implementation("com.formdev:flatlaf:3.7.1")
+    implementation("com.github.librepdf:openpdf:3.0.5")
 }
 
 java {

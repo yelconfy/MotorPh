@@ -263,4 +263,32 @@ public class Status {
       return label;
     }
   }
+
+  // Audit_Log.ActionType
+  public enum AuditAction {
+    INSERT(0),
+    UPDATE(1),
+    DELETE(2),
+    PRINT(3);
+
+    private final int value;
+
+    AuditAction(int v) {
+      this.value = v;
+    }
+
+    public int getValue() {
+      return value;
+    }
+
+    @Override
+    public String toString() {
+      return name().charAt(0) + name().substring(1).toLowerCase();
+    }
+
+    public static AuditAction fromInt(int i) {
+      for (AuditAction a : values()) if (a.value == i) return a;
+      return INSERT;
+    }
+  }
 }

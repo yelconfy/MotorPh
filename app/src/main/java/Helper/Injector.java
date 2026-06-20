@@ -1,17 +1,13 @@
 package Helper;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.function.Supplier;
-
-import javax.swing.JComponent;
-
 import Core.Form.ShellFrame;
 import Core.Service.FormControlService;
 import Core.Service.PayrollCalculator;
+import Core.Service.PayslipPdfRenderer;
 import DataAccess.AccessDAO;
 import DataAccess.AllowanceDAO;
 import DataAccess.AttendanceDAO;
+import DataAccess.AuditLogDAO;
 import DataAccess.DeductionDAO;
 import DataAccess.DepartmentDAO;
 import DataAccess.EmployeeAddressesDao;
@@ -27,15 +23,22 @@ import DataAccess.WorkScheduleDAO;
 import Forms.EmployeeManagementPanel;
 import Forms.LoginForm;
 import Forms.PayrollPanel;
+import Forms.PayslipRegisterPanel;
 import Forms.TimeKeepingPanel;
 import Interface.IEmpMgmtProcess;
 import Interface.ILoginProcess;
 import Interface.IPayrollProcess;
+import Interface.IPayslipPrintProcess;
 import Objects.models.IAM.Session;
 import Processes.EmpMgmtProcess;
 import Processes.LoginProcess;
 import Processes.PayrollProcess;
+import Processes.PayslipPrintProcess;
 import Processes.TimeKeepingProcess;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.function.Supplier;
+import javax.swing.JComponent;
 
 /**
  * Central DI factory.
@@ -102,6 +105,10 @@ public class Injector {
     return new DeductionDAO();
   }
 
+  private static AuditLogDAO getAuditLogDAO() {
+    return new AuditLogDAO();
+  }
+
   // -------------------------------------------------------------------------
   // Process factories
   // -------------------------------------------------------------------------
@@ -129,6 +136,10 @@ public class Injector {
       getDeductionDAO(),
       new PayrollCalculator()
     );
+  }
+
+  public static IPayslipPrintProcess CreatePayslipPrintProcess() {
+    return new PayslipPrintProcess(getPayrollDAO(), getAuditLogDAO());
   }
 
   // -------------------------------------------------------------------------
@@ -178,6 +189,14 @@ public class Injector {
     //   () -> new TimeKeepingForm(new TimeKeepingProcess(getAttendanceDAO()))
     views.put("TIMEKEEPING", () ->
       new TimeKeepingPanel(new TimeKeepingProcess(getAttendanceDAO()))
+    );
+
+    views.put("PAYSLIP", () ->
+      new PayslipRegisterPanel(
+        CreatePayslipPrintProcess(),
+        CreateEmpMgmtProcess(),
+        new PayslipPdfRenderer()
+      )
     );
 
     return views;
