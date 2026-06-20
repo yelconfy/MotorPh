@@ -24,8 +24,12 @@ public class AttendanceDAO {
   /**
    * GetByDateRange — used by PayrollProcess to calculate worked hours.
    * Returns all attendance rows for a single employee within [startDate, endDate].
+   *
+   * Shared-Connection overload: participates in the caller's connection so a
+   * payroll run keeps every read on one connection. Does NOT open or close.
    */
   public List<Attendance> GetByDateRange(
+    Connection conn,
     long employeeId,
     LocalDate startDate,
     LocalDate endDate
@@ -39,10 +43,7 @@ public class AttendanceDAO {
       "AND a.AttendanceDate BETWEEN ? AND ? " +
       "ORDER BY a.AttendanceDate ASC";
 
-    try (
-      Connection conn = DatabaseConnector.GetConnection();
-      PreparedStatement pstmt = conn.prepareStatement(sql)
-    ) {
+    try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
       pstmt.setLong(1, employeeId);
       pstmt.setDate(2, java.sql.Date.valueOf(startDate));
       pstmt.setDate(3, java.sql.Date.valueOf(endDate));
@@ -54,6 +55,21 @@ public class AttendanceDAO {
       }
     }
     return logs;
+  }
+
+  /**
+   * Self-opening overload for one-shot UI reads (no surrounding transaction).
+   * Do NOT call this from inside a payroll run that holds a shared Connection —
+   * it would close the single shared connection out from under the caller.
+   */
+  public List<Attendance> GetByDateRange(
+    long employeeId,
+    LocalDate startDate,
+    LocalDate endDate
+  ) throws SQLException {
+    try (Connection conn = DatabaseConnector.GetConnection()) {
+      return GetByDateRange(conn, employeeId, startDate, endDate);
+    }
   }
 
   /**

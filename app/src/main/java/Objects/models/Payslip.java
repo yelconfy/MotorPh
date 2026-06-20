@@ -47,6 +47,12 @@ public class Payslip extends BaseObject {
   private LocalDate PeriodStart;
   private LocalDate PeriodEnd;
 
+  // Period-accurate enrichment for printing (null/0 when the DAO doesn't join)
+  private String PositionName;
+  private String DepartmentName;
+  private double MonthlyRate; // EmployeeSalary.BasicSalary in force during the period
+  private double HourlyRate; // EmployeeSalary.HourlyRate  in force during the period
+
   public static final String[] DISPLAY_FIELDS = {
     "PayslipId",
     "EmployeeId",
@@ -98,6 +104,18 @@ public class Payslip extends BaseObject {
     try {
       java.sql.Date pe = rs.getDate("EndDate");
       this.PeriodEnd = (pe != null) ? pe.toLocalDate() : null;
+    } catch (SQLException ignored) {}
+    try {
+      this.PositionName = rs.getString("PositionName");
+    } catch (SQLException ignored) {}
+    try {
+      this.DepartmentName = rs.getString("DepartmentName");
+    } catch (SQLException ignored) {}
+    try {
+      this.MonthlyRate = rs.getDouble("MonthlyRate");
+    } catch (SQLException ignored) {}
+    try {
+      this.HourlyRate = rs.getDouble("HourlyRate");
     } catch (SQLException ignored) {}
   }
 
@@ -273,5 +291,42 @@ public class Payslip extends BaseObject {
 
   public void SetPeriodEnd(LocalDate v) {
     this.PeriodEnd = v;
+  }
+
+  public String GetPositionName() {
+    return PositionName;
+  }
+
+  public void SetPositionName(String v) {
+    this.PositionName = v;
+  }
+
+  public String GetDepartmentName() {
+    return DepartmentName;
+  }
+
+  public void SetDepartmentName(String v) {
+    this.DepartmentName = v;
+  }
+
+  public double GetMonthlyRate() {
+    return MonthlyRate;
+  }
+
+  public void SetMonthlyRate(double v) {
+    this.MonthlyRate = v;
+  }
+
+  public double GetHourlyRate() {
+    return HourlyRate;
+  }
+
+  public void SetHourlyRate(double v) {
+    this.HourlyRate = v;
+  }
+
+  /** Period-accurate daily rate = hourly × 8 (system convention: basic ÷ 21.75 ÷ 8). */
+  public double GetDailyRate() {
+    return HourlyRate * 8.0;
   }
 }

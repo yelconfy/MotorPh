@@ -78,6 +78,101 @@ LEFT JOIN EmployeeAddresses a ON e.EmployeeID     = a.EmployeeID
 LEFT JOIN vw_CurrentSalary cs ON e.EmployeeID     = cs.EmployeeID;
 GO
 
+-- Employee payslip report: one row per payslip, reproducing the MotorPH
+-- payslip layout (identity, period, earnings, itemised benefits, itemised
+-- statutory deductions, gross/deductions/net summary). Source of truth is the
+-- frozen Payslip snapshot; the line tables are pivoted into named columns and
+-- two reconciliation columns re-derive gross/net to verify the snapshot.
+-- NOTE: MonthlyRate / DailyRate come from vw_CurrentSalary (LATEST effective
+-- rate), not the rate as-of the historical period. BasicPay (snapshot) is the
+-- period-accurate earned basic and remains authoritative.
+CREATE VIEW vw_EmployeePayslipReport AS
+SELECT
+    -- Payslip / period identity
+    ps.PayslipID,
+    ps.PayrollPeriodID,
+    pp.PeriodName,
+    pp.StartDate                                        AS PeriodStart,
+    pp.EndDate                                          AS PeriodEnd,
+    pp.PayDate,
+
+    -- Employee identity (JOINs)
+    e.EmployeeID,
+    (e.FirstName + N' ' + e.LastName)                   AS EmployeeName,
+    p.PositionName,
+    d.DepartmentName,
+    sd.SssNo,
+    sd.PhilHealthNo,
+    sd.TinNo,
+    sd.PagIbigNo,
+
+    -- Attendance snapshot
+    ps.DaysWorked,
+    ps.HoursWorked,
+
+    -- Earnings
+    cs.BasicSalary                                      AS MonthlyRate,
+    CAST(cs.BasicSalary / 21.75 AS DECIMAL(18,2))       AS DailyRate,
+    cs.HourlyRate,
+    ps.BasicPay,
+
+    -- Benefits (allowance lines pivoted to columns)
+    ISNULL(al.Rice,     0)                              AS RiceSubsidy,
+    ISNULL(al.Phone,    0)                              AS PhoneAllowance,
+    ISNULL(al.Clothing, 0)                              AS ClothingAllowance,
+    ps.TotalAllowances,
+
+    -- Deductions (deduction lines pivoted to columns)
+    ISNULL(dl.SSS,         0)                           AS SSS,
+    ISNULL(dl.PhilHealth,  0)                           AS PhilHealth,
+    ISNULL(dl.PagIBIG,     0)                           AS PagIBIG,
+    ISNULL(dl.Withholding, 0)                           AS WithholdingTax,
+    ISNULL(dl.OtherDed,    0)                           AS OtherDeductions,
+    ps.TotalDeductions,
+
+    -- Summary (from snapshot)
+    ps.GrossPay,
+    ps.TotalAdjustments,
+    ps.NetPay,
+
+    -- Reconciliation (re-derived to verify the snapshot)
+    (ps.BasicPay + ISNULL(ps.TotalAllowances, 0))                                  AS GrossPay_Check,
+    (ps.GrossPay - ISNULL(ps.TotalDeductions, 0) + ISNULL(ps.TotalAdjustments, 0)) AS NetPay_Check,
+
+    ps.Status                                           AS PayslipStatus  -- 0=Draft,1=Finalized,2=Paid
+FROM Payslip ps
+    INNER JOIN Payroll_Period   pp ON pp.PayrollPeriodID = ps.PayrollPeriodID
+    INNER JOIN Employees        e  ON e.EmployeeID       = ps.EmployeeID
+    LEFT  JOIN Positions        p  ON p.PositionID       = e.PositionID
+    LEFT  JOIN Departments      d  ON d.DepartmentID     = e.DepartmentID
+    LEFT  JOIN StatutoryDetails sd ON sd.EmployeeID      = e.EmployeeID
+    LEFT  JOIN vw_CurrentSalary cs ON cs.EmployeeID      = e.EmployeeID
+    LEFT JOIN (
+        SELECT
+            pa.PayslipID,
+            SUM(CASE WHEN at.AllowanceName = 'Rice Subsidy'       THEN pa.Amount END) AS Rice,
+            SUM(CASE WHEN at.AllowanceName = 'Phone Allowance'    THEN pa.Amount END) AS Phone,
+            SUM(CASE WHEN at.AllowanceName = 'Clothing Allowance' THEN pa.Amount END) AS Clothing
+        FROM Payroll_Allowance pa
+            INNER JOIN Allowance_Type at ON at.AllowanceTypeID = pa.AllowanceTypeID
+        GROUP BY pa.PayslipID
+    ) al ON al.PayslipID = ps.PayslipID
+    LEFT JOIN (
+        SELECT
+            pd.PayslipID,
+            SUM(CASE WHEN dt.DeductionName = 'SSS'             THEN pd.Amount END) AS SSS,
+            SUM(CASE WHEN dt.DeductionName = 'PhilHealth'      THEN pd.Amount END) AS PhilHealth,
+            SUM(CASE WHEN dt.DeductionName = 'Pag-IBIG'        THEN pd.Amount END) AS PagIBIG,
+            SUM(CASE WHEN dt.DeductionName = 'Withholding Tax' THEN pd.Amount END) AS Withholding,
+            SUM(CASE WHEN dt.DeductionName NOT IN
+                     ('SSS','PhilHealth','Pag-IBIG','Withholding Tax')
+                     THEN pd.Amount END)                                           AS OtherDed
+        FROM Payroll_Deduction pd
+            INNER JOIN Deduction_Type dt ON dt.DeductionTypeID = pd.DeductionTypeID
+        GROUP BY pd.PayslipID
+    ) dl ON dl.PayslipID = ps.PayslipID;
+GO
+
 -- Optional: single activity timeline (audit + access merged).
 CREATE VIEW vw_SystemActivity AS
 SELECT 'AUDIT'  AS Source, Username, ActionTimestamp AS EventTime,
