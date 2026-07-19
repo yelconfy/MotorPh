@@ -27,6 +27,10 @@ public class WorkedHoursSummary {
   private int overtimeHours;
   private int totalLateMinutes;
   private int totalAbsentDays;
+  private int specialHolidayHours;
+  private int paidLeaveDays;
+  private int nightDiffHours;
+  private int totalUndertimeMinutes;
 
   public WorkedHoursSummary() {}
 
@@ -58,6 +62,22 @@ public class WorkedHoursSummary {
     this.totalAbsentDays += days;
   }
 
+  public void AddSpecialHolidayHours(int hours) {
+    this.specialHolidayHours += hours;
+  }
+
+  public void AddPaidLeaveDays(int days) {
+    this.paidLeaveDays += days;
+  }
+
+  public void AddNightDiffHours(int hours) {
+    this.nightDiffHours += hours;
+  }
+
+  public void AddUndertimeMinutes(int minutes) {
+    this.totalUndertimeMinutes += minutes;
+  }
+
   // -------------------------------------------------------------------------
   // Totals
   // -------------------------------------------------------------------------
@@ -86,21 +106,49 @@ public class WorkedHoursSummary {
     return totalAbsentDays;
   }
 
+  public int GetSpecialHolidayHours() {
+    return specialHolidayHours;
+  }
+
   /** Convenience: all paid worked hours across buckets (excludes late / absent). */
   public int GetTotalWorkedHours() {
-    return regularHours + weekendHours + holidayHours + overtimeHours;
+    return (
+      regularHours +
+      weekendHours +
+      holidayHours +
+      overtimeHours +
+      specialHolidayHours
+    );
+  }
+
+  public int GetNightDiffHours() {
+    return nightDiffHours;
+  }
+
+  public int GetTotalUndertimeMinutes() {
+    return totalUndertimeMinutes;
+  }
+
+  public int GetPaidLeaveDays() {
+    return paidLeaveDays;
   }
 
   @Override
   public String toString() {
     return (
       "WorkedHoursSummary{" +
-      "regular=" + regularHours +
-      ", weekend=" + weekendHours +
-      ", holiday=" + holidayHours +
-      ", overtime=" + overtimeHours +
-      ", lateMinutes=" + totalLateMinutes +
-      ", absentDays=" + totalAbsentDays +
+      "regular=" +
+      regularHours +
+      ", weekend=" +
+      weekendHours +
+      ", holiday=" +
+      holidayHours +
+      ", overtime=" +
+      overtimeHours +
+      ", lateMinutes=" +
+      totalLateMinutes +
+      ", absentDays=" +
+      totalAbsentDays +
       "}"
     );
   }

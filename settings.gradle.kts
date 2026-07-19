@@ -1,2 +1,2 @@
-rootProject.name = "S1101_project"
+rootProject.name = "MotorPh"
 include("app")

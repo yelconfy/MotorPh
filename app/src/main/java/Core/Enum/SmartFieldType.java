@@ -24,9 +24,18 @@ public enum SmartFieldType {
   DEPARTMENT(true, null, "^[A-Za-z\\s]{2,30}$"),
 
   // Numeric & Contact
+  // Numeric & Contact
   CURRENCY(true, null, "^\\d{1,3}(,\\d{3})*(\\.\\d{2})?$"),
+  // Plain decimal, no currency prefix/grouping — DECIMAL(5,2)-shaped fields like
+  // Leave_Type.DefaultDaysPerYear / MaxCarryOverDays. Not mandatory: blank is a
+  // legitimate value (both columns are nullable, 0.0 in the Java model when null).
+  NUMERIC(false, null, "^\\d{1,3}(\\.\\d{1,2})?$"),
   PHONE(true, "####-###-####", "^\\+?[0-9\\s-]{7,15}$"),
   DATE(true, "MM/DD/YYYY", "^(0[1-9]|1[0-2])/(0[1-9]|[12][0-9]|3[01])/\\d{4}$"), // MM-DD-YYYY
+  // 24-hour clock, e.g. "08:00" / "17:00" — Work_Schedule.TimeStart/TimeEnd are
+  // NOT NULL, so mandatory=true (unlike NUMERIC's nullable day-count fields).
+  // TimeEnd < TimeStart is a VALID overnight shift (app logic), not rejected here.
+  TIME(true, "HH:MM", "^([01]\\d|2[0-3]):[0-5]\\d$"),
 
   // Fallback
   GENERIC(false, null, ".*"),

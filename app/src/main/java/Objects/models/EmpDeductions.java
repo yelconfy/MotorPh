@@ -12,6 +12,7 @@ public class EmpDeductions {
   private double latesDeduction;
   private double absencesDeduction;
   private double totalDeductions;
+  private double undertimeDeduction;
 
   // <editor-fold defaultstate="collapsed" desc="Constructors">
   // Clean default constructor (for CSV or manual calc)
@@ -59,6 +60,10 @@ public class EmpDeductions {
     return absencesDeduction;
   }
 
+  public double GetUndertimeDeduction() {
+    return undertimeDeduction;
+  }
+
   // </editor-fold>
 
   // <editor-fold defaultstate="collapsed" desc="Setters">
@@ -88,6 +93,10 @@ public class EmpDeductions {
 
   public void SetTotalDeductions(double totalDeductions) {
     this.totalDeductions = totalDeductions;
+  }
+
+  public void SetUndertimeDeduction(double v) {
+    this.undertimeDeduction = v;
   }
   // </editor-fold>
 }

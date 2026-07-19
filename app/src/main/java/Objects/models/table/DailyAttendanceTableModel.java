@@ -92,9 +92,10 @@ public class DailyAttendanceTableModel extends AbstractTableModel {
         ? formatHm(r.GetOvertimeMinutes())
         : "";
       case 10 -> switch (r.GetDayType()) {
-        case HOLIDAY -> "Holiday";
-        case WEEKEND -> "Weekend";
-        case REGULAR -> "Regular";
+        case HOLIDAY         -> "Holiday";
+        case HOLIDAY_SPECIAL -> "Special Holiday";
+        case WEEKEND         -> "Weekend";
+        case REGULAR         -> "Regular";
       };
       default -> null;
     };

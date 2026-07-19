@@ -17,6 +17,9 @@ dependencies {
     implementation("org.mindrot:jbcrypt:0.4")
     implementation("com.formdev:flatlaf:3.7.1")
     implementation("com.github.librepdf:openpdf:3.0.5")
+    implementation("com.formdev:flatlaf-extras:3.7.1")
+    implementation("com.zaxxer:HikariCP:5.1.0")
+    implementation("org.slf4j:slf4j-simple:2.0.13")   // Hikari logs via SLF4J; without a binding it prints a "no providers" warning
 }
 
 java {

@@ -65,6 +65,39 @@ public class WorkScheduleInfo extends BaseObject {
     return (totalMinutes - BreakMinutes) / 60.0;
   }
 
+  /**
+   * Default fallback schedule — the standard MotorPH shift (Mon-Fri 08:00-17:00,
+   * 60-min unpaid break, 10-min grace). Used by the attendance calculator when an
+   * employee has no Work_Schedule assigned, so per-day math never NPEs. Mirrors
+   * the 'Standard 8:00-17:00' seed (ETL 07 step 4b / script 13).
+   */
+  public static WorkScheduleInfo Default() {
+    WorkScheduleInfo s = new WorkScheduleInfo();
+    s.ScheduleId = 0;
+    s.ScheduleName = "Standard 8:00-17:00";
+    s.TimeStart = LocalTime.of(8, 0);
+    s.TimeEnd = LocalTime.of(17, 0);
+    s.BreakMinutes = 60;
+    s.GracePeriodMinutes = 10;
+    s.WorksMon = s.WorksTue = s.WorksWed = s.WorksThu = s.WorksFri = true;
+    s.WorksSat = s.WorksSun = false;
+    s.SetActive(true);
+    return s;
+  }
+
+  public boolean WorksOn(java.time.LocalDate date) {
+    if (date == null) return false;
+    return switch (date.getDayOfWeek()) {
+      case MONDAY    -> WorksMon;
+      case TUESDAY   -> WorksTue;
+      case WEDNESDAY -> WorksWed;
+      case THURSDAY  -> WorksThu;
+      case FRIDAY    -> WorksFri;
+      case SATURDAY  -> WorksSat;
+      case SUNDAY    -> WorksSun;
+    };
+  }
+
   // -------------------------------------------------------------------------
   // Getters & Setters
   // -------------------------------------------------------------------------
@@ -144,4 +177,12 @@ public class WorkScheduleInfo extends BaseObject {
   public boolean GetWorksSun() {
     return WorksSun;
   }
+
+  public void SetWorksMon(boolean v) { this.WorksMon = v; }
+  public void SetWorksTue(boolean v) { this.WorksTue = v; }
+  public void SetWorksWed(boolean v) { this.WorksWed = v; }
+  public void SetWorksThu(boolean v) { this.WorksThu = v; }
+  public void SetWorksFri(boolean v) { this.WorksFri = v; }
+  public void SetWorksSat(boolean v) { this.WorksSat = v; }
+  public void SetWorksSun(boolean v) { this.WorksSun = v; }
 }

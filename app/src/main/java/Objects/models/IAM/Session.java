@@ -1,6 +1,9 @@
 package Objects.models.IAM;
 
 import Objects.models.User;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Holds the authenticated user — and the identity of the backing User_Session
@@ -25,6 +28,17 @@ import Objects.models.User;
  *   seconds and, the moment it finds the row revoked by a login on another
  *   workstation, forces a logout. End() clears the holder on logout.
  *
+ * RBAC PERMISSION CACHE (BKL-25):
+ *   permissionMatrix holds the whole role x module x permission grant matrix
+ *   for the logged-in role, keyed by ModuleCode. It is populated exactly once,
+ *   by Injector.CreateShell() right after login (via AccessDAO.GetPermissionMatrix),
+ *   and read by every gated module registration through GetPermissions(code) —
+ *   replacing what used to be one AccessDAO query per panel mount. Session
+ *   itself never touches AccessDAO: Model-layer code must not depend on
+ *   DataAccess, so the DI layer resolves the matrix and pushes it in via
+ *   SetPermissionMatrix(). Cleared on End() so a later login (a different role,
+ *   or the same role re-granted) never reads a stale matrix.
+ *
  * THREADING: every read/write happens on the Swing event-dispatch thread
  *   (login, heartbeat via javax.swing.Timer, and logout are all on the EDT),
  *   so no synchronization is required on these static fields.
@@ -34,6 +48,7 @@ public final class Session {
   private static User currentUser;
   private static long sessionId;
   private static String sessionToken;
+  private static Map<String, List<String>> permissionMatrix = Collections.emptyMap();
 
   private Session() {}
 
@@ -72,6 +87,30 @@ public final class Session {
   }
 
   // -------------------------------------------------------------------------
+  // RBAC permission cache (BKL-25) — see class javadoc.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Caches the full role x module x permission grant matrix for this session.
+   * Called once by Injector.CreateShell(), before any module view is built.
+   * Not part of Start() itself: loading it requires AccessDAO, which the
+   * Model layer (this class) must not depend on — the DI layer resolves it
+   * and pushes the result in here.
+   */
+  public static void SetPermissionMatrix(Map<String, List<String>> matrix) {
+    Session.permissionMatrix = (matrix != null) ? matrix : Collections.emptyMap();
+  }
+
+  /**
+   * Granted permission codes for one module, read from the session-scoped
+   * cache — no DB access. Empty list if the role holds nothing on that
+   * module (mirrors AccessDAO.GetPermissionCodes' empty-on-miss behavior).
+   */
+  public static List<String> GetPermissions(String moduleCode) {
+    return permissionMatrix.getOrDefault(moduleCode, Collections.emptyList());
+  }
+
+  // -------------------------------------------------------------------------
   // Convenience facades — read through the composed User (single source of
   // truth). Safe to call before login: they return neutral defaults.
   // -------------------------------------------------------------------------
@@ -105,5 +144,6 @@ public final class Session {
     currentUser  = null;
     sessionId    = 0L;
     sessionToken = null;
+    permissionMatrix = Collections.emptyMap();
   }
 }

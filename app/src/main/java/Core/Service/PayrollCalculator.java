@@ -1,6 +1,6 @@
 package Core.Service;
 
-import Core.Service.AttendanceCalculator;
+import Interface.IPremiumRates;
 import Interface.IStatutoryRates;
 import Objects.enums.Constants.*;
 import Objects.enums.Status.AttendanceStatus;
@@ -34,7 +34,8 @@ public final class PayrollCalculator {
   private static final double STANDARD_HOURS_PER_DAY = 8.0;
 
   // AttendanceCalculator is pure, stateless per-day math (same instance reused).
-  private final AttendanceCalculator attendanceCalculator = new AttendanceCalculator();
+  private final AttendanceCalculator attendanceCalculator =
+    new AttendanceCalculator();
 
   // =========================================================================
   // Hours
@@ -45,22 +46,29 @@ public final class PayrollCalculator {
    * The per-day formula is owned by AttendanceCalculator.ComputeDay so Payroll
    * and Timekeeping never disagree on hours.
    */
-  public WorkedHoursSummary CalculateHoursWorked(List<Attendance> logs) {
+  public WorkedHoursSummary CalculateHoursWorked(
+    List<Attendance> logs,
+    AttendanceContext ctx
+  ) {
     WorkedHoursSummary summary = new WorkedHoursSummary();
     if (logs == null) {
       return summary;
     }
 
     for (Attendance record : logs) {
-      DailyAttendanceRecord day = attendanceCalculator.ComputeDay(record);
+      DailyAttendanceRecord day = attendanceCalculator.ComputeDay(record, ctx);
 
-      // Missing punch(es): no pay credit, counted as an absent day. Matches the
-      // old PayrollProcess.IsAbsent (TimeIn == null || TimeOut == null).
+      if (day.GetStatus() == AttendanceStatus.ON_LEAVE) {
+        summary.AddPaidLeaveDays(1); // paid via flat basic; not docked, no hours
+        continue;
+      }
+
       if (
         day.GetStatus() == AttendanceStatus.ABSENT ||
-        day.GetStatus() == AttendanceStatus.INCOMPLETE
+        day.GetStatus() == AttendanceStatus.INCOMPLETE ||
+        day.GetStatus() == AttendanceStatus.ON_LEAVE_UNPAID
       ) {
-        summary.AddAbsentDays(1);
+        summary.AddAbsentDays(1); // unpaid leave docks like an absence (cash-equivalent)
         continue;
       }
 
@@ -72,11 +80,16 @@ public final class PayrollCalculator {
       int regHours = (int) (day.GetRegularMinutes() / 60);
       switch (day.GetDayType()) {
         case HOLIDAY -> summary.AddHolidayHours(regHours);
+        case HOLIDAY_SPECIAL -> summary.AddSpecialHolidayHours(regHours);
         case WEEKEND -> summary.AddWeekendHours(regHours);
         default -> summary.AddRegularHours(regHours);
       }
 
-      summary.AddOvertimeHours((int) (day.GetOvertimeMinutes() / 60));
+      summary.AddOvertimeHours((int) (day.GetApprovedOvertimeMinutes() / 60));
+      summary.AddNightDiffHours((int) (day.GetNightDiffMinutes() / 60));
+      if (day.GetUndertimeMinutes() > 0) {
+        summary.AddUndertimeMinutes((int) day.GetUndertimeMinutes());
+      }
     }
     return summary;
   }
@@ -103,8 +116,11 @@ public final class PayrollCalculator {
     boolean hasAttendance =
       hours.GetRegularHours() > 0 ||
       hours.GetHolidayHours() > 0 ||
+      hours.GetSpecialHolidayHours() > 0 ||
       hours.GetWeekendHours() > 0 ||
-      hours.GetTotalAbsentDays() > 0;
+      hours.GetTotalAbsentDays() > 0 ||
+      hours.GetPaidLeaveDays() > 0;
+
     if (!hasAttendance) {
       deductions.SetTotalDeductions(0.0);
       return deductions;
@@ -150,12 +166,15 @@ public final class PayrollCalculator {
     LocalDate start,
     LocalDate end,
     WorkedHoursSummary hours,
-    EmpDeductions deductions
+    EmpDeductions deductions,
+    IPremiumRates premiums
   ) {
     boolean hasWorked =
       hours.GetRegularHours() > 0 ||
       hours.GetHolidayHours() > 0 ||
-      hours.GetWeekendHours() > 0;
+      hours.GetSpecialHolidayHours() > 0 ||
+      hours.GetWeekendHours() > 0 ||
+      hours.GetPaidLeaveDays() > 0;
 
     double hourlyRate = salary.GetHourlyRate();
 
@@ -166,23 +185,37 @@ public final class PayrollCalculator {
 
     // OT and rest-day / holiday premiums: additional earnings at full rate.
     double overtimePay =
-      hours.GetOvertimeHours() * hourlyRate *
-      OvertimeRateMultiplier.REGULAR_OT.getMultiplier();
-
+      hours.GetOvertimeHours() * hourlyRate * premiums.RegularOvertime();
     double weekendPremiumPay =
-      hours.GetWeekendHours() * hourlyRate *
-      PremiumRateMultiplier.REST_DAY.getMultiplier();
-
+      hours.GetWeekendHours() * hourlyRate * premiums.RestDay();
     double holidayPremiumPay =
-      hours.GetHolidayHours() * hourlyRate *
-      PremiumRateMultiplier.REGULAR_HOLIDAY.getMultiplier();
+      hours.GetHolidayHours() * hourlyRate * premiums.RegularHoliday();
+    double specialHolidayPremiumPay =
+      hours.GetSpecialHolidayHours() * hourlyRate * premiums.SpecialHoliday();
+    double nightDiffPay =
+      hours.GetNightDiffHours() *
+      hourlyRate *
+      (premiums.NightDifferential() - 1.0);
 
     double grossPay = Round2(
-      semiMonthlyBasic + allowances + overtimePay + weekendPremiumPay + holidayPremiumPay
+      semiMonthlyBasic +
+        allowances +
+        overtimePay +
+        weekendPremiumPay +
+        holidayPremiumPay +
+        specialHolidayPremiumPay +
+        nightDiffPay
     );
     double netPay = Round2(grossPay - deductions.GetTotalDeductions());
 
-    EmpPaySlip slip = new EmpPaySlip(emp, grossPay, netPay, deductions, start, end);
+    EmpPaySlip slip = new EmpPaySlip(
+      emp,
+      grossPay,
+      netPay,
+      deductions,
+      start,
+      end
+    );
     // Breakdown carried on the slip so the persisted Payslip snapshot maps 1:1
     // (no recomputation of basic / allowances downstream).
     slip.SetBasicPay(semiMonthlyBasic);
@@ -190,7 +223,10 @@ public final class PayrollCalculator {
     return slip;
   }
 
-  public double ComputeOvertimePay(WorkedHoursSummary summary, double hourlyRate) {
+  public double ComputeOvertimePay(
+    WorkedHoursSummary summary,
+    double hourlyRate
+  ) {
     if (summary == null || hourlyRate <= 0) {
       return 0.0;
     }
@@ -239,6 +275,16 @@ public final class PayrollCalculator {
     deductions.SetAbsencesDeduction(
       ComputeAbsencesDeduction(hours.GetTotalAbsentDays(), hourlyRate)
     );
+    deductions.SetUndertimeDeduction(
+      ComputeUndertimeDeduction(hours.GetTotalUndertimeMinutes(), hourlyRate)
+    );
+  }
+
+  private double ComputeUndertimeDeduction(
+    int undertimeMinutes,
+    double hourlyRate
+  ) {
+    return Round2((hourlyRate / 60.0) * undertimeMinutes); // same basis as lates
   }
 
   private double ComputeLatesDeduction(int lateMinutes, double hourlyRate) {
@@ -256,7 +302,8 @@ public final class PayrollCalculator {
       deductions.GetPagIbigContribution() +
       deductions.GetWithholdingTax() +
       deductions.GetLatesDeduction() +
-      deductions.GetAbsencesDeduction();
+      deductions.GetAbsencesDeduction() +
+      deductions.GetUndertimeDeduction();
     deductions.SetTotalDeductions(Round2(total));
   }
 

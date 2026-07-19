@@ -4,6 +4,7 @@ import DataAccess.AccessDAO;
 import DataAccess.EmployeeDAO;
 import DataAccess.SessionDAO;
 import Helper.Injector;
+import Objects.enums.Constants.ModuleIcons;
 import Objects.models.AppModule;
 import Objects.models.IAM.Session;
 import java.awt.BorderLayout;
@@ -15,6 +16,8 @@ import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.GridBagLayout;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.sql.SQLException;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
@@ -36,7 +39,6 @@ import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
-import javax.swing.JTree;
 import javax.swing.WindowConstants;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeCellRenderer;
@@ -89,7 +91,9 @@ public class ShellFrame extends JFrame {
   // -------------------------------------------------------------------------
   private final CardLayout cardLayout = new CardLayout();
   private final JPanel workArea = new JPanel(cardLayout);
-  private final JTree navTree = new JTree();
+  private final JPanel navListPanel = new JPanel();
+  private String selectedModuleCode = null;
+  private String navFilter = "";
   private final Set<String> mounted = new HashSet<>();
   private final List<AppModule> navModules = new ArrayList<>();
   private final SessionDAO sessionDAO = new SessionDAO();
@@ -103,6 +107,16 @@ public class ShellFrame extends JFrame {
     EmployeeDAO empDAO,
     Map<String, Supplier<JComponent>> moduleViews
   ) {
+    long ti = System.nanoTime();
+    for (var m : accessDAO.GetModulesForRole(Session.GetRoleId())) {
+      ModuleIcons.For(m.GetModuleCode(), java.awt.Color.BLACK, 16);
+    }
+    System.out.printf(
+      "[SHELL] icon decode (%d modules): %.0f ms%n",
+      accessDAO.GetModulesForRole(Session.GetRoleId()).size(), // fine to double-call for a one-off measurement
+      (System.nanoTime() - ti) / 1e6
+    );
+
     this.accessDAO = accessDAO;
     this.empDAO = empDAO;
     this.moduleViews = moduleViews;
@@ -114,8 +128,16 @@ public class ShellFrame extends JFrame {
     setLocationRelativeTo(null);
     setExtendedState(JFrame.MAXIMIZED_BOTH);
 
+    long t0 = System.nanoTime();
     resolveNavModules();
+    long t1 = System.nanoTime();
     setContentPane(buildContent());
+    long t2 = System.nanoTime();
+    System.out.printf(
+      "[SHELL] resolveNavModules(DB): %.0f ms | buildContent: %.0f ms%n",
+      (t1 - t0) / 1e6,
+      (t2 - t1) / 1e6
+    );
     // Single-session heartbeat: detects takeover by another workstation.
     this.sessionMonitor = new SessionMonitor(
       sessionDAO,
@@ -226,7 +248,6 @@ public class ShellFrame extends JFrame {
       BorderFactory.createMatteBorder(0, 0, 0, 1, new Color(0xD8DBDF))
     );
 
-    // Header + search
     JPanel header = new JPanel(new BorderLayout(0, 6));
     header.setOpaque(false);
     header.setBorder(BorderFactory.createEmptyBorder(16, 16, 8, 16));
@@ -241,46 +262,24 @@ public class ShellFrame extends JFrame {
     search
       .getDocument()
       .addDocumentListener(
-        (SimpleDocListener) () -> rebuildTree(search.getText())
+        (SimpleDocListener) () -> {
+          navFilter = search.getText();
+          rebuildNavList();
+        }
       );
 
     header.add(title, BorderLayout.NORTH);
     header.add(search, BorderLayout.SOUTH);
 
-    // Tree
-    navTree.setRootVisible(false);
-    navTree.setShowsRootHandles(false);
-    navTree.setFont(new Font(FONT_FAMILY, Font.PLAIN, 14));
-    navTree.setBackground(SIDEBAR_BG);
-    navTree.setBorder(BorderFactory.createEmptyBorder(4, 8, 8, 8));
-    navTree
-      .getSelectionModel()
-      .setSelectionMode(TreeSelectionModel.SINGLE_TREE_SELECTION);
+    navListPanel.setLayout(new BoxLayout(navListPanel, BoxLayout.Y_AXIS));
+    navListPanel.setBackground(SIDEBAR_BG);
+    navListPanel.setBorder(BorderFactory.createEmptyBorder(4, 0, 8, 0));
+    rebuildNavList();
 
-    DefaultTreeCellRenderer renderer = new DefaultTreeCellRenderer();
-    renderer.setBackgroundNonSelectionColor(SIDEBAR_BG);
-    renderer.setBackgroundSelectionColor(BRAND_RED);
-    renderer.setTextSelectionColor(Color.WHITE);
-    renderer.setBorderSelectionColor(BRAND_RED);
-    renderer.setLeafIcon(null);
-    renderer.setClosedIcon(null);
-    renderer.setOpenIcon(null);
-    navTree.setCellRenderer(renderer);
-
-    navTree.addTreeSelectionListener(e -> {
-      DefaultMutableTreeNode node =
-        (DefaultMutableTreeNode) navTree.getLastSelectedPathComponent();
-      if (node == null) return;
-      if (node.getUserObject() instanceof AppModule m) {
-        showModule(m);
-      }
-    });
-
-    rebuildTree("");
-
-    JScrollPane scroll = new JScrollPane(navTree);
+    JScrollPane scroll = new JScrollPane(navListPanel);
     scroll.setBorder(BorderFactory.createEmptyBorder());
     scroll.getViewport().setBackground(SIDEBAR_BG);
+    scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
 
     side.add(header, BorderLayout.NORTH);
     side.add(scroll, BorderLayout.CENTER);
@@ -354,22 +353,75 @@ public class ShellFrame extends JFrame {
   // -------------------------------------------------------------------------
 
   /** Rebuilds the nav tree, optionally filtered by a case-insensitive substring. */
-  private void rebuildTree(String filter) {
-    String needle = filter == null ? "" : filter.trim().toLowerCase();
-    DefaultMutableTreeNode root = new DefaultMutableTreeNode("Modules");
+  private void rebuildNavList() {
+    String needle = navFilter == null ? "" : navFilter.trim().toLowerCase();
+    navListPanel.removeAll();
 
     for (AppModule m : navModules) {
       if (
         needle.isEmpty() || m.GetModuleName().toLowerCase().contains(needle)
       ) {
-        root.add(new DefaultMutableTreeNode(m));
+        navListPanel.add(buildNavRow(m));
       }
     }
 
-    navTree.setModel(new DefaultTreeModel(root));
-    for (int i = 0; i < navTree.getRowCount(); i++) {
-      navTree.expandRow(i);
-    }
+    navListPanel.revalidate();
+    navListPanel.repaint();
+  }
+
+  private JComponent buildNavRow(AppModule module) {
+    boolean selected = module.GetModuleCode().equals(selectedModuleCode);
+    Color textColor = selected ? BRAND_DARK : new Color(0x5F6368);
+    Color rowBg = selected ? Color.WHITE : SIDEBAR_BG;
+
+    JLabel label = new JLabel(module.GetModuleName());
+    label.setIcon(ModuleIcons.For(module.GetModuleCode(), textColor, 16));
+    label.setIconTextGap(10);
+    label.setFont(new Font(FONT_FAMILY, selected ? Font.BOLD : Font.PLAIN, 13));
+    label.setForeground(textColor);
+
+    JPanel row = new JPanel(new BorderLayout());
+    row.setBackground(rowBg);
+    row.setBorder(
+      BorderFactory.createCompoundBorder(
+        BorderFactory.createMatteBorder(
+          0,
+          3,
+          0,
+          0,
+          selected ? BRAND_RED : rowBg
+        ),
+        BorderFactory.createEmptyBorder(8, 11, 8, 12)
+      )
+    );
+    row.add(label, BorderLayout.CENTER);
+    row.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+    row.setMaximumSize(
+      new Dimension(Integer.MAX_VALUE, row.getPreferredSize().height)
+    );
+
+    row.addMouseListener(
+      new MouseAdapter() {
+        @Override
+        public void mouseClicked(MouseEvent e) {
+          selectedModuleCode = module.GetModuleCode();
+          showModule(module);
+          rebuildNavList();
+        }
+
+        @Override
+        public void mouseEntered(MouseEvent e) {
+          if (!selected) row.setBackground(FOOTER_BG);
+        }
+
+        @Override
+        public void mouseExited(MouseEvent e) {
+          if (!selected) row.setBackground(rowBg);
+        }
+      }
+    );
+
+    return row;
   }
 
   /** Mounts the module's view on first use, then brings it to the front. */

@@ -29,6 +29,7 @@ public class LeaveRequest extends BaseObject {
   private Long ActionedBy; // nullable FK → Users.UserID
   private LocalDateTime DateFiled;
   private LocalDateTime DateActioned; // nullable
+  private boolean IsPaid; // set by GetApprovedForPeriod (JOIN Leave_Type)
 
   public static final String[] DISPLAY_FIELDS = {
     "LeaveRequestId",
@@ -174,5 +175,13 @@ public class LeaveRequest extends BaseObject {
 
   public void SetDateActioned(LocalDateTime v) {
     this.DateActioned = v;
+  }
+
+  public boolean IsPaid() {
+    return IsPaid;
+  }
+
+  public void SetPaid(boolean v) {
+    this.IsPaid = v;
   }
 }

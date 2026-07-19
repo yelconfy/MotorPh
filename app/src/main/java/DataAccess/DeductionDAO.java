@@ -19,6 +19,15 @@ import java.util.List;
  * Parallel to AllowanceDAO — same upsert pattern.
  * Handles per-employee VOLUNTARY/recurring deductions.
  * Statutory amounts are computed dynamically — do NOT store them here.
+ *
+ * BKL-01 stage 3b: write methods for Deduction_Type (Insert / Update / Delete /
+ * IsInUse) added so the Deduction Type Maintenance module can drive it through
+ * DeductionTypeMaintenanceProcess. Unlike Departments/Positions, Deduction_Type
+ * has its own Status column (GetAllTypes already filters on it), so Delete here
+ * is a soft delete, not a hard DELETE guarded by an FK exception. IsInUse is the
+ * explicit guard that replaces what SQL error 547 would have caught for free on
+ * a hard delete — see DeductionTypeMaintenanceProcess.Delete for how the two
+ * combine into a SaveResult.
  */
 public class DeductionDAO {
 
@@ -52,6 +61,81 @@ public class DeductionDAO {
             try (ResultSet rs = pstmt.executeQuery()) {
                 return rs.next() ? rs.getInt("DeductionTypeID") : -1;
             }
+        }
+    }
+
+    /**
+     * Insert — add a new deduction type (Deduction Type Maintenance / Add).
+     * Status defaults to 1 (active) at the schema level.
+     */
+    public boolean Insert(Connection conn, DeductionTypeInfo dt) throws SQLException {
+        String sql = "INSERT INTO Deduction_Type (DeductionName, Category) VALUES (?, ?)";
+
+        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, dt.GetDeductionName());
+            pstmt.setInt(2, dt.GetCategory().getValue());
+            return pstmt.executeUpdate() > 0;
+        }
+    }
+
+    /**
+     * Update — rename / recategorize an existing deduction type
+     * (Deduction Type Maintenance / Edit). The four statutory rows never reach
+     * this call — ReferenceMaintenancePanel blocks Edit on them via
+     * MaintenanceDescriptor.protectedWhen before Accept can fire.
+     */
+    public boolean Update(Connection conn, DeductionTypeInfo dt) throws SQLException {
+        String sql =
+            "UPDATE Deduction_Type SET DeductionName = ?, Category = ? WHERE DeductionTypeID = ?";
+
+        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, dt.GetDeductionName());
+            pstmt.setInt(2, dt.GetCategory().getValue());
+            pstmt.setInt(3, dt.GetDeductionTypeId());
+            return pstmt.executeUpdate() > 0;
+        }
+    }
+
+    /**
+     * IsInUse — true if any employee currently has an active standing deduction
+     * or an active loan against this type. Unlike Departments/Positions, a soft
+     * delete here never trips a real FK exception, so this is the explicit
+     * stand-in for that guard: PayrollProcess and the loan ledger both key off
+     * Deduction_Type staying meaningful for any row an employee is actively
+     * drawing against. Payroll_Deduction (historical, already-generated
+     * payslips) and Contribution_Rate (statutory-only, and those rows never
+     * reach Delete at all — see protectedWhen) are deliberately NOT checked.
+     */
+    public boolean IsInUse(Connection conn, int deductionTypeId) throws SQLException {
+        String sql =
+            "SELECT CASE WHEN EXISTS (" +
+            "    SELECT 1 FROM Employee_Deduction WHERE DeductionTypeID = ? AND Status = 1" +
+            ") OR EXISTS (" +
+            "    SELECT 1 FROM Employee_Loan WHERE DeductionTypeID = ? AND Status = 0" +
+            ") THEN 1 ELSE 0 END";
+
+        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setInt(1, deductionTypeId);
+            pstmt.setInt(2, deductionTypeId);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                return rs.next() && rs.getBoolean(1);
+            }
+        }
+    }
+
+    /**
+     * Delete — soft delete (Deduction_Type has its own Status column, unlike
+     * Departments/Positions). Caller (DeductionTypeMaintenanceProcess) is
+     * responsible for checking IsInUse first — this method does not guard
+     * itself, matching how DepartmentDAO.Delete leaves the FK check to the DB
+     * and DepartmentMaintenanceProcess to interpret the exception.
+     */
+    public boolean Delete(Connection conn, int deductionTypeId) throws SQLException {
+        String sql = "UPDATE Deduction_Type SET Status = 0 WHERE DeductionTypeID = ?";
+
+        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setInt(1, deductionTypeId);
+            return pstmt.executeUpdate() > 0;
         }
     }
 

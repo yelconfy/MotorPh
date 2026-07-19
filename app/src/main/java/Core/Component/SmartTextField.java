@@ -1,10 +1,10 @@
 package Core.Component;
 
+import Core.Enum.SmartFieldType;
 import java.awt.Color;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
 import java.text.DecimalFormat;
-
 import javax.swing.BorderFactory;
 import javax.swing.JTextField;
 import javax.swing.UIManager;
@@ -13,8 +13,6 @@ import javax.swing.text.AbstractDocument;
 import javax.swing.text.AttributeSet;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.DocumentFilter;
-
-import Core.Enum.SmartFieldType;
 
 public class SmartTextField extends JTextField implements SmartField {
 
@@ -59,6 +57,14 @@ public class SmartTextField extends JTextField implements SmartField {
 
     // 2. Currency
     if (smartType == SmartFieldType.CURRENCY) {
+      if (!incomingText.matches("[0-9.]*")) return false;
+      if (incomingText.contains(".") && currentText.contains(".")) return false;
+      return true;
+    }
+
+    // 3. Plain numeric (e.g. leave-type day counts) — digits + at most one dot,
+    // no comma grouping (unlike CURRENCY, this never gets a "PHP"/comma reformat).
+    if (smartType == SmartFieldType.NUMERIC) {
       if (!incomingText.matches("[0-9.]*")) return false;
       if (incomingText.contains(".") && currentText.contains(".")) return false;
       return true;
@@ -127,6 +133,8 @@ public class SmartTextField extends JTextField implements SmartField {
           return 12;
         case DATE:
           return 8; // MMDDYYYY
+        case TIME:
+          return 4; // HHMM
         case EMPLOYEE_ID:
           return 5; // MMDDYYYY
         default:
@@ -166,8 +174,9 @@ public class SmartTextField extends JTextField implements SmartField {
       smartType == SmartFieldType.TIN ||
       smartType == SmartFieldType.PHILHEALTH ||
       smartType == SmartFieldType.PAGIBIG ||
-      smartType == SmartFieldType.DATE
-    ); // Keeps slashes out while typing
+      smartType == SmartFieldType.DATE ||
+      smartType == SmartFieldType.TIME
+    ); // Keeps slashes/colons out while typing
   }
 
   public void applyFormatting() {
@@ -254,6 +263,12 @@ public class SmartTextField extends JTextField implements SmartField {
             );
           }
           break;
+        case TIME: // HH:MM
+          String timeRaw = text.replaceAll("[^\\d]", "");
+          if (timeRaw.length() == 4) {
+            super.setText(timeRaw.substring(0, 2) + ":" + timeRaw.substring(2));
+          }
+          break;
         default:
           break;
       }
@@ -282,7 +297,16 @@ public class SmartTextField extends JTextField implements SmartField {
       this.setBackground(new Color(255, 235, 235));
     } else {
       this.setBorder(defaultBorder);
-      this.setBackground(UIManager.getColor("TextField.background"));
+      // Respect current editability — a non-editable field losing focus (e.g.
+      // clicked-through in VIEW mode) must NOT get forced back to the enabled
+      // white background. setBackground() doesn't auto-revert when
+      // setEditable() later toggles, so hardcoding the enabled color here
+      // unconditionally is what caused a VIEW-mode field to visually "wake up"
+      // after one focus/blur cycle, even though it was never actually typable.
+      Color bg = isEditable()
+        ? UIManager.getColor("TextField.background")
+        : UIManager.getColor("TextField.inactiveBackground");
+      this.setBackground(bg != null ? bg : UIManager.getColor("TextField.background"));
     }
   }
 

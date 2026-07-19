@@ -187,29 +187,34 @@ public class Status {
     }
   }
 
-  // Holiday.HolidayType
+  /**
+   * Classification of a Holiday row (mirrors Holiday.HolidayType TINYINT).
+   *
+   *   REGULAR             (0) - regular holiday, 200% if worked
+   *   SPECIAL_NON_WORKING (1) - special non-working day, 130% if worked
+   *
+   * The premium MULTIPLIERS themselves live in Constants.PremiumRateMultiplier
+   * (and will move to the versioned Premium_Rate table in Phase 6); this enum only
+   * carries the classification + its DB code so there is a single source of truth
+   * for the rates.
+   */
   public enum HolidayType {
     REGULAR(0),
     SPECIAL_NON_WORKING(1);
 
-    private final int value;
+    private final int code;
 
-    HolidayType(int v) {
-      this.value = v;
+    HolidayType(int code) {
+      this.code = code;
     }
 
-    public int getValue() {
-      return value;
+    public int GetCode() {
+      return code;
     }
 
-    @Override
-    public String toString() {
-      return this == REGULAR ? "Regular" : "Special Non-Working";
-    }
-
-    public static HolidayType fromInt(int i) {
-      for (HolidayType s : values()) if (s.value == i) return s;
-      return REGULAR;
+    /** Maps the Holiday.HolidayType TINYINT to the enum (anything != 1 => REGULAR). */
+    public static HolidayType FromCode(int code) {
+      return (code == 1) ? SPECIAL_NON_WORKING : REGULAR;
     }
   }
 
@@ -246,7 +251,9 @@ public class Status {
     PRESENT("Present"),
     LATE("Late"),
     INCOMPLETE("Incomplete"),
-    ABSENT("Absent");
+    ABSENT("Absent"),
+    ON_LEAVE("On Leave"),
+    ON_LEAVE_UNPAID("Unpaid Leave");
 
     private final String label;
 

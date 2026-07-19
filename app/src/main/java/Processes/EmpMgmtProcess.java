@@ -6,6 +6,7 @@ import java.time.LocalDate;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import DataAccess.AllowanceDAO;
 import DataAccess.DatabaseConnector;
@@ -24,6 +25,7 @@ import Objects.models.EmployeeInfo;
 import Objects.models.EmployeeSalaryInfo;
 import Objects.models.PositionInfo;
 import Objects.models.WorkScheduleInfo;
+import Objects.results.SaveResult;
 
 /**
  * Employee-management orchestration. Wraps the employee-detail DAOs in atomic
@@ -37,6 +39,25 @@ import Objects.models.WorkScheduleInfo;
  * insert-only (no UPDATE — history must be preserved). An edit to pay is
  * therefore recorded as a NEW effective-dated row, i.e. a salary adjustment.
  * See ApplySalaryAdjustment.
+ *
+ * BKL-35 B-rollout (step 2): AddEmployee/UpdateEmployee now report through
+ * SaveResult<Long> instead of a bare boolean. Two changes from the prior
+ * shape:
+ *   1. The allowances-must-be-positive business rule, formerly gated in
+ *      EmployeeManagementPanel.onAccept() (allowancesPositive(), which also
+ *      drove per-field red-border highlighting), now lives here as
+ *      ValidateAllowances — checked up front, before any connection is
+ *      opened, so a bad amount short-circuits as VALIDATION_FAILED instead of
+ *      silently reaching SaveAllowances' own defensive skip. The per-field
+ *      highlighting in the panel is gone; the dialog now carries the same
+ *      message SaveResult reports, matching the vocabulary every other
+ *      converted screen already uses.
+ *   2. Both methods now carry the payload discipline AttendanceCorrectionProcess
+ *      established: an AtomicReference set at every exit point inside the
+ *      ExecuteAtomic lambda, defaulting to a generic failed() if nothing
+ *      overwrote it (e.g. an unexpected SQLException caught by ExecuteAtomic
+ *      itself, such as SaveAllowances throwing on an unseeded allowance type
+ *      — that stays a generic FAILED, same as before this change).
  */
 public class EmpMgmtProcess
   extends BaseMaintenanceProcess
@@ -142,39 +163,86 @@ public class EmpMgmtProcess
     }
   }
 
+  // -------------------------------------------------------------------------
+  // Writes
+  // -------------------------------------------------------------------------
+
   @Override
-  public boolean AddEmployee(EmpDetail newEmployee) {
-    return ExecuteAtomic(conn -> {
+  public SaveResult<Long> AddEmployee(EmpDetail newEmployee) {
+    String allowanceError = ValidateAllowances(newEmployee.GetAllowances());
+    if (allowanceError != null) {
+      return SaveResult.invalid(allowanceError);
+    }
+
+    AtomicReference<SaveResult<Long>> outcome = new AtomicReference<>(SaveResult.failed());
+
+    ExecuteAtomic(conn -> {
       long newID = empDAO.Insert(conn, newEmployee);
-      if (newID > 0) {
-        newEmployee.SetEmployeeId(newID); // surface generated ID for post-save reselection
-        addrDAO.Insert(conn, newID, newEmployee.GetAddress());
-        salaryDAO.Insert(conn, newID, newEmployee.GetCompensation());
-        statDAO.Insert(conn, newID, newEmployee.GetStatutory());
-        SaveAllowances(conn, newID, newEmployee.GetAllowances());
-        return true;
+      if (newID <= 0) {
+        outcome.set(SaveResult.failed());
+        return false;
       }
-      return false;
+      newEmployee.SetEmployeeId(newID); // surface generated ID for post-save reselection
+      addrDAO.Insert(conn, newID, newEmployee.GetAddress());
+      salaryDAO.Insert(conn, newID, newEmployee.GetCompensation());
+      statDAO.Insert(conn, newID, newEmployee.GetStatutory());
+      SaveAllowances(conn, newID, newEmployee.GetAllowances());
+      outcome.set(SaveResult.success(newID));
+      return true;
     });
+
+    return outcome.get();
   }
 
   @Override
-  public boolean UpdateEmployee(EmpDetail updatedEmp) {
-    return ExecuteAtomic(conn -> {
-      long empID = updatedEmp.GetEmployeeId();
+  public SaveResult<Long> UpdateEmployee(EmpDetail updatedEmp) {
+    String allowanceError = ValidateAllowances(updatedEmp.GetAllowances());
+    if (allowanceError != null) {
+      return SaveResult.invalid(allowanceError);
+    }
+
+    long empID = updatedEmp.GetEmployeeId();
+    AtomicReference<SaveResult<Long>> outcome = new AtomicReference<>(SaveResult.failed());
+
+    ExecuteAtomic(conn -> {
       empDAO.Update(conn, updatedEmp);
       addrDAO.Update(conn, empID, updatedEmp.GetAddress());
       // EmployeeSalary is versioned: a pay change is a NEW row, not an UPDATE.
       ApplySalaryAdjustment(conn, empID, updatedEmp.GetCompensation());
       statDAO.Update(conn, empID, updatedEmp.GetStatutory());
       SaveAllowances(conn, empID, updatedEmp.GetAllowances());
+      outcome.set(SaveResult.success(empID));
       return true;
     });
+
+    return outcome.get();
   }
 
   @Override
   public boolean DeleteEmployee(long empNo) {
     return ExecuteAtomic(conn -> empDAO.Delete(conn, empNo));
+  }
+
+  /**
+   * BKL-35 B-rollout: the rule moved down from
+   * EmployeeManagementPanel.allowancesPositive() (deleted along with its
+   * per-field checkPositive() helper — that highlighting is superseded by the
+   * VALIDATION_FAILED dialog every other converted screen already uses).
+   * Checked before any connection is opened: a bad amount is a pure input
+   * problem, not something that needs a DB round-trip to detect.
+   *
+   * Returns a user-facing message if any allowance is <= 0, else null.
+   */
+  private String ValidateAllowances(List<AllowanceInfo> allowances) {
+    if (allowances == null) {
+      return null;
+    }
+    for (AllowanceInfo a : allowances) {
+      if (a != null && a.GetAmount() <= 0) {
+        return "Allowance amounts must be greater than zero.";
+      }
+    }
+    return null;
   }
 
   private void CompleteEmployee(Connection conn, EmpDetail emp, long empNo)
@@ -249,8 +317,9 @@ public class EmpMgmtProcess
    * EmployeeSalaryInfo. Each row is resolved to its AllowanceTypeID (explicit ID
    * when present, else by name) and upserted on (EmployeeID, AllowanceTypeID).
    *
-   * Amount is assumed > 0 (the editor validates this; a 0 only comes from bad
-   * seed data, fixed at the script level). Non-positive amounts are skipped.
+   * Amount positivity is now enforced up front by ValidateAllowances (BKL-35);
+   * the <= 0 skip below is retained as a defensive belt-and-suspenders, not
+   * the primary gate.
    *
    * An unknown allowance name (not seeded in Allowance_Type) ABORTS the save by
    * throwing — silently dropping a pay-affecting allowance is worse than a visible
@@ -273,7 +342,7 @@ public class EmpMgmtProcess
     Map<String, Integer> typeIds = allowanceDAO.GetTypeIdsByName(conn);
     for (AllowanceInfo a : allowances) {
       if (a == null || a.GetAmount() <= 0) {
-        continue; // editor guarantees > 0; defensive skip
+        continue; // defensive skip; ValidateAllowances already gated this
       }
       int typeId = ResolveAllowanceTypeId(a, typeIds);
       if (typeId <= 0) {

@@ -1,18 +1,5 @@
 package Processes;
 
-import Core.Service.PayrollCalculator;
-import DataAccess.AllowanceDAO;
-import DataAccess.AttendanceDAO;
-import DataAccess.DatabaseConnector;
-import DataAccess.DeductionDAO;
-import DataAccess.EmployeeDAO;
-import DataAccess.PayrollDAO;
-import DataAccess.StatutoryRateDAO;
-import Interface.IPayrollProcess;
-import Interface.IStatutoryRates;
-import Objects.enums.Status.PayrollDeductionSource;
-import Objects.enums.Status.PayrollPeriodStatus;
-import Objects.models.*;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.time.LocalDate;
@@ -20,6 +7,39 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import Core.Service.PayrollCalculator;
+import DataAccess.AllowanceDAO;
+import DataAccess.AttendanceDAO;
+import DataAccess.DatabaseConnector;
+import DataAccess.DeductionDAO;
+import DataAccess.EmployeeDAO;
+import DataAccess.HolidayDAO;
+import DataAccess.LeaveDAO;
+import DataAccess.OvertimeDAO;
+import DataAccess.PayrollDAO;
+import DataAccess.PremiumRateDAO;
+import DataAccess.StatutoryRateDAO;
+import DataAccess.WorkScheduleDAO;
+import Interface.IPayrollProcess;
+import Interface.IPremiumRates;
+import Interface.IStatutoryRates;
+import Objects.enums.Status.PayrollDeductionSource;
+import Objects.enums.Status.PayrollPeriodStatus;
+import Objects.models.AllowanceInfo;
+import Objects.models.Attendance;
+import Objects.models.AttendanceContext;
+import Objects.models.DeductionTypeInfo;
+import Objects.models.EmpDeductions;
+import Objects.models.EmpDetail;
+import Objects.models.EmpPaySlip;
+import Objects.models.HolidayCalendar;
+import Objects.models.LeaveRequest;
+import Objects.models.OvertimeRequest;
+import Objects.models.PayrollPeriod;
+import Objects.models.Payslip;
+import Objects.models.WorkScheduleInfo;
+import Objects.models.WorkedHoursSummary;
 
 /**
  * Payroll period-run engine: orchestration + persistence only.
@@ -54,6 +74,11 @@ public class PayrollProcess implements IPayrollProcess {
   private final EmployeeDAO employeeDAO;
   private final AllowanceDAO allowanceDAO;
   private final DeductionDAO deductionDAO;
+  private final WorkScheduleDAO scheduleDAO;
+  private final HolidayDAO holidayDAO;
+  private final OvertimeDAO overtimeDAO;
+  private final LeaveDAO leaveDAO;
+  private final PremiumRateDAO premiumRateDAO;
   private final PayrollCalculator calculator;
 
   public PayrollProcess(
@@ -63,6 +88,11 @@ public class PayrollProcess implements IPayrollProcess {
     EmployeeDAO _employeeDAO,
     AllowanceDAO _allowanceDAO,
     DeductionDAO _deductionDAO,
+    WorkScheduleDAO _scheduleDAO,
+    HolidayDAO _holidayDAO,
+    OvertimeDAO _overtimeDAO,
+    LeaveDAO _leaveDAO,
+    PremiumRateDAO _premiumRateDAO,
     PayrollCalculator _calculator
   ) {
     this.attendanceDAO = _attendanceDAO;
@@ -71,6 +101,11 @@ public class PayrollProcess implements IPayrollProcess {
     this.employeeDAO = _employeeDAO;
     this.allowanceDAO = _allowanceDAO;
     this.deductionDAO = _deductionDAO;
+    this.scheduleDAO = _scheduleDAO;
+    this.holidayDAO = _holidayDAO;
+    this.overtimeDAO = _overtimeDAO;
+    this.leaveDAO = _leaveDAO;
+    this.premiumRateDAO = _premiumRateDAO;
     this.calculator = _calculator;
   }
 
@@ -109,6 +144,20 @@ public class PayrollProcess implements IPayrollProcess {
         asOf
       );
 
+      IPremiumRates premiums = new PremiumRateProvider(
+        premiumRateDAO,
+        readConn,
+        asOf
+      );
+
+      HolidayCalendar holidays = new HolidayCalendar(
+        holidayDAO.GetByDateRange(
+          readConn,
+          period.GetStartDate(),
+          period.GetEndDate()
+        )
+      );
+
       for (EmpDetail emp : employees) {
         // Relies on vw_EmployeeCompleteDetails.Status -> EmpDetail.IsActive().
         if (!emp.IsActive()) {
@@ -126,13 +175,84 @@ public class PayrollProcess implements IPayrollProcess {
           period.GetStartDate(),
           period.GetEndDate()
         );
-        WorkedHoursSummary hours = calculator.CalculateHoursWorked(logs);
+        WorkScheduleInfo schedule = ResolveSchedule(readConn, emp);
+
+        // approved OT minutes per date (Phase 4)
+        java.util.Map<java.time.LocalDate, Long> otByDate =
+          new java.util.HashMap<>();
+        for (OvertimeRequest ot : overtimeDAO.GetApprovedForPeriod(
+          readConn,
+          emp.GetEmployeeId(),
+          period.GetStartDate(),
+          period.GetEndDate()
+        )) {
+          otByDate.merge(
+            ot.GetOvertimeDate(),
+            ot.GetOvertimeMinutes(),
+            Long::sum
+          );
+        }
+
+        // approved leave per date (Phase 5): expand spans over scheduled, non-holiday workdays
+        java.util.Map<java.time.LocalDate, Boolean> leaveByDate =
+          new java.util.HashMap<>();
+        for (LeaveRequest lr : leaveDAO.GetApprovedForPeriod(
+          readConn,
+          emp.GetEmployeeId(),
+          period.GetStartDate(),
+          period.GetEndDate()
+        )) {
+          for (
+            java.time.LocalDate d = lr.GetStartDate();
+            !d.isAfter(lr.GetEndDate());
+            d = d.plusDays(1)
+          ) {
+            if (
+              d.isBefore(period.GetStartDate()) ||
+              d.isAfter(period.GetEndDate())
+            ) continue;
+            if (schedule.WorksOn(d) && !holidays.IsHoliday(d)) {
+              leaveByDate.put(d, lr.IsPaid());
+            }
+          }
+        }
+
+        // synthesize null-punch rows for leave dates with no real attendance row
+        java.util.Set<java.time.LocalDate> haveRow = new java.util.HashSet<>();
+        for (Attendance row : logs) haveRow.add(row.GetAttendanceDate());
+        java.util.List<Attendance> augmented = new java.util.ArrayList<>(logs);
+        for (java.time.LocalDate d : leaveByDate.keySet()) {
+          if (!haveRow.contains(d)) {
+            Attendance synth = new Attendance();
+            synth.SetEmployeeId(emp.GetEmployeeId());
+            synth.SetAttendanceDate(d);
+            augmented.add(synth);
+          }
+        }
+
+        AttendanceContext ctx = new AttendanceContext(
+          java.util.Map.of(emp.GetEmployeeId(), schedule),
+          schedule,
+          holidays,
+          java.util.Map.of(emp.GetEmployeeId(), otByDate),
+          java.util.Map.of(emp.GetEmployeeId(), leaveByDate),
+          premiums.NightWindowStart(),
+          premiums.NightWindowEnd()
+        );
+
+        WorkedHoursSummary hours = calculator.CalculateHoursWorked(
+          augmented,
+          ctx
+        );
 
         boolean hasData =
           hours.GetRegularHours() > 0 ||
           hours.GetHolidayHours() > 0 ||
+          hours.GetSpecialHolidayHours() > 0 ||
           hours.GetWeekendHours() > 0 ||
+          hours.GetPaidLeaveDays() > 0 ||
           hours.GetTotalAbsentDays() > 0;
+
         if (!hasData) {
           continue; // no attendance in the period -> no slip
         }
@@ -143,13 +263,15 @@ public class PayrollProcess implements IPayrollProcess {
           secondCutoff,
           rates
         );
+
         EmpPaySlip slip = calculator.GenerateEmpPaySlip(
           emp,
           emp.GetCompensation(),
           period.GetStartDate(),
           period.GetEndDate(),
           hours,
-          deductions
+          deductions,
+          premiums
         );
 
         Payslip header = calculator.ToPayslipSnapshot(
@@ -384,6 +506,25 @@ public class PayrollProcess implements IPayrollProcess {
       }
     }
     return payrollDAO.InsertPeriod(conn, period);
+  }
+
+  /**
+   * Resolves the employee's full Work_Schedule. EmpDetail only carries a
+   * ScheduleID stub from the view, so hydrate the full row here. Falls back to
+   * WorkScheduleInfo.Default() when the employee has no schedule assigned.
+   */
+  private WorkScheduleInfo ResolveSchedule(Connection conn, EmpDetail emp)
+    throws SQLException {
+    if (
+      emp.GetWorkSchedule() != null && emp.GetWorkSchedule().GetScheduleId() > 0
+    ) {
+      WorkScheduleInfo full = scheduleDAO.GetByID(
+        conn,
+        emp.GetWorkSchedule().GetScheduleId()
+      );
+      if (full != null) return full;
+    }
+    return WorkScheduleInfo.Default();
   }
 
   // =========================================================================

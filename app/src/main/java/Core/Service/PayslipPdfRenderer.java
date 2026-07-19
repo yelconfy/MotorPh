@@ -1,5 +1,9 @@
 package Core.Service;
 
+import Objects.models.Payslip;
+import Objects.models.PayslipAllowanceLine;
+import Objects.models.PayslipDeductionLine;
+import Objects.models.PayslipDetail;
 import java.awt.Color;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -9,7 +13,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
-
 import org.openpdf.text.Document;
 import org.openpdf.text.DocumentException;
 import org.openpdf.text.Element;
@@ -21,11 +24,6 @@ import org.openpdf.text.Phrase;
 import org.openpdf.text.pdf.PdfPCell;
 import org.openpdf.text.pdf.PdfPTable;
 import org.openpdf.text.pdf.PdfWriter;
-
-import Objects.models.Payslip;
-import Objects.models.PayslipAllowanceLine;
-import Objects.models.PayslipDeductionLine;
-import Objects.models.PayslipDetail;
 
 /**
  * Pure PayslipDetail -> PDF rendering (OpenPDF 3.x, package org.openpdf). No DB,
@@ -51,11 +49,10 @@ import Objects.models.PayslipDetail;
  */
 public final class PayslipPdfRenderer {
 
-  private static final Color BRAND_DARK = new Color(0x0D1B2A);
-  private static final Color BRAND_RED = new Color(0xE53935);
-  private static final Color MUTED = new Color(0x6B7682);
-  private static final Color SHADE = new Color(0xEFEFEF);
-  private static final Color LINE = new Color(0xDDDDDD);
+  private static final Color BRAND_DARK = PdfSupport.BRAND_DARK;
+  private static final Color MUTED = PdfSupport.MUTED;
+  private static final Color SHADE = PdfSupport.SHADE;
+  private static final Color LINE = PdfSupport.LINE;
 
   private static final DateTimeFormatter DT = DateTimeFormatter.ofPattern(
     "MMM d, yyyy h:mm a"
@@ -85,7 +82,7 @@ public final class PayslipPdfRenderer {
       PdfWriter.getInstance(doc, out);
       doc.open();
 
-      doc.add(header());
+      doc.add(PdfSupport.header("EMPLOYEE PAYSLIP"));
       doc.add(infoGrid(h));
       doc.add(earnings(h));
       doc.add(benefits(detail));
@@ -115,35 +112,6 @@ public final class PayslipPdfRenderer {
   // Header / title / info grid
   // -------------------------------------------------------------------------
 
-  private static PdfPTable header() {
-    PdfPTable t = new PdfPTable(1);
-    t.setWidthPercentage(100);
-    t.setSpacingAfter(4f);
-
-    PdfPCell c = new PdfPCell();
-    c.setBorder(PdfPCell.NO_BORDER);
-    c.setHorizontalAlignment(Element.ALIGN_LEFT);
-    c.addElement(
-      new Paragraph(
-        "MotorPH",
-        FontFactory.getFont(FontFactory.HELVETICA, 20, Font.BOLD, BRAND_RED)
-      )
-    );
-    c.addElement(
-      new Paragraph(
-        "EMPLOYEE PAYSLIP",
-        FontFactory.getFont(
-          FontFactory.HELVETICA,
-          14,
-          Font.BOLD | Font.UNDERLINE,
-          BRAND_DARK
-        )
-      )
-    );
-    t.addCell(c);
-    return t;
-  }
-
   private static PdfPTable infoGrid(Payslip h) {
     PdfPTable t = new PdfPTable(new float[] { 20f, 26f, 22f, 32f });
     t.setWidthPercentage(100);
@@ -157,18 +125,18 @@ public final class PayslipPdfRenderer {
       orEmpty(h.GetPositionName()) +
       (notBlank(h.GetDepartmentName()) ? " / " + h.GetDepartmentName() : "");
 
-    infoLabel(t, "PAYSLIP NO");
-    infoValue(t, payslipNo);
-    infoLabel(t, "PERIOD START DATE");
-    infoValue(t, fmt(h.GetPeriodStart()));
-    infoLabel(t, "EMPLOYEE ID");
-    infoValue(t, String.valueOf(h.GetEmployeeId()));
-    infoLabel(t, "PERIOD END DATE");
-    infoValue(t, fmt(h.GetPeriodEnd()));
-    infoLabel(t, "EMPLOYEE NAME");
-    infoValue(t, nameLastFirst(h));
-    infoLabel(t, "EMPLOYEE POSITION/DEPARTMENT");
-    infoValue(t, posDept);
+    PdfSupport.infoLabel(t, "PAYSLIP NO");
+    PdfSupport.infoValue(t, payslipNo);
+    PdfSupport.infoLabel(t, "PERIOD START DATE");
+    PdfSupport.infoValue(t, fmt(h.GetPeriodStart()));
+    PdfSupport.infoLabel(t, "EMPLOYEE ID");
+    PdfSupport.infoValue(t, String.valueOf(h.GetEmployeeId()));
+    PdfSupport.infoLabel(t, "PERIOD END DATE");
+    PdfSupport.infoValue(t, fmt(h.GetPeriodEnd()));
+    PdfSupport.infoLabel(t, "EMPLOYEE NAME");
+    PdfSupport.infoValue(t, nameLastFirst(h));
+    PdfSupport.infoLabel(t, "EMPLOYEE POSITION/DEPARTMENT");
+    PdfSupport.infoValue(t, posDept);
     return t;
   }
 
@@ -334,38 +302,6 @@ public final class PayslipPdfRenderer {
     c.setPadding(5f);
     if (bg != null) c.setBackgroundColor(bg);
     return c;
-  }
-
-  private static void infoLabel(PdfPTable t, String text) {
-    PdfPCell c = new PdfPCell(
-      new Phrase(
-        text,
-        FontFactory.getFont(FontFactory.HELVETICA, 8, Font.BOLD, Color.WHITE)
-      )
-    );
-    c.setBackgroundColor(BRAND_DARK);
-    c.setBorderColor(Color.WHITE);
-    c.setPadding(5f);
-    c.setVerticalAlignment(Element.ALIGN_MIDDLE);
-    t.addCell(c);
-  }
-
-  private static void infoValue(PdfPTable t, String text) {
-    PdfPCell c = new PdfPCell(
-      new Phrase(
-        text,
-        FontFactory.getFont(
-          FontFactory.HELVETICA,
-          8.5f,
-          Font.NORMAL,
-          BRAND_DARK
-        )
-      )
-    );
-    c.setBorderColor(LINE);
-    c.setPadding(5f);
-    c.setVerticalAlignment(Element.ALIGN_MIDDLE);
-    t.addCell(c);
   }
 
   private static String peso(double v) {

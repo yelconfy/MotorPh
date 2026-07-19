@@ -1,12 +1,15 @@
 package Objects.enums;
 
 import Helper.KeyValue;
+import com.formdev.flatlaf.extras.FlatSVGIcon;
+import java.awt.Color;
 import java.text.MessageFormat;
 import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.function.Predicate;
+import javax.swing.Icon;
 
 public class Constants {
 
@@ -286,6 +289,7 @@ public class Constants {
 
   public enum PremiumRateMultiplier {
     REST_DAY(1.30), // worked rest day / weekend
+    SPECIAL_HOLIDAY(1.30), // worked special non-working day
     REGULAR_HOLIDAY(2.00); // worked regular holiday
 
     // future granularity: SPECIAL_HOLIDAY(1.30), REST_DAY_HOLIDAY(2.60), NIGHT_DIFF(1.10)
@@ -300,7 +304,7 @@ public class Constants {
     }
   }
 
-    // </editor-fold>
+  // </editor-fold>
 
   // <editor-fold defaultstate="collapsed" desc="SSSBracket">
   public enum SSSBracket {
@@ -523,5 +527,109 @@ public class Constants {
       return this.deptCode;
     }
   }
+
+  // </editor-fold>
+
+  // <editor-fold defaultstate="collapsed" desc="ModuleIcons">
+
+  /**
+   * Resolves a navigation icon for a module by <b>convention, not a hard-coded
+   * table</b>: the icon for module code {@code XYZ} is the SVG at
+   * {@code Assets/Icons/xyz.svg} (code lower-cased). Adding a new module needs
+   * no change here — just drop a matching SVG into that folder.
+   *
+   * Resolution order, so the UI never shows a broken (red-square) icon:
+   *   1. {@code Assets/Icons/<code>.svg}      — the module's own icon
+   *   2. {@code Assets/Icons/_default.svg}    — generic fallback glyph
+   *   3. a blank transparent icon             — last resort, keeps layout stable
+   *
+   * Each path is tried on the classpath first (works from the packaged jar),
+   * then in the dev source tree (works when run straight from the IDE).
+   */
+  public static final class ModuleIcons {
+
+    private static final String CLASSPATH_DIR = "Assets/Icons/";
+    private static final String DEV_TREE_DIR =
+      "app/src/main/resources/Assets/Icons/";
+    private static final String DEFAULT_NAME = "_default";
+
+    // Cache keyed by code|color|size so repeated nav rebuilds don't re-decode SVGs.
+    private static final java.util.Map<String, Icon> CACHE =
+      new java.util.concurrent.ConcurrentHashMap<>();
+
+    private ModuleIcons() {}
+
+    public static Icon For(String moduleCode, Color color, int sizePx) {
+      String code = moduleCode == null ? "" : moduleCode.trim().toLowerCase();
+      String key = code + "|" + color.getRGB() + "|" + sizePx;
+      return CACHE.computeIfAbsent(key, k -> resolve(code, color, sizePx));
+    }
+
+    private static Icon resolve(String code, Color color, int sizePx) {
+      FlatSVGIcon icon = load(code, sizePx);
+      if (icon == null) {
+        icon = load(DEFAULT_NAME, sizePx);
+      }
+      if (icon == null) {
+        return new BlankIcon(sizePx);
+      }
+      return icon.setColorFilter(
+        new FlatSVGIcon.ColorFilter().add(Color.BLACK, color)
+      );
+    }
+
+    /**
+     * Loads {@code <name>.svg}: classpath first (packaged jar), then the dev
+     * source tree (running from the IDE). Returns {@code null} if neither has
+     * it, so the caller can fall back instead of getting FlatSVGIcon's
+     * red-square "not found" placeholder.
+     *
+     * Uses java.io.File fully-qualified on purpose: Constants already declares
+     * a nested File enum (the legacy CSV one above), which shadows any plain
+     * "File" reference in this whole class — only qualifying the real type
+     * works, an import can't fix that.
+     */
+    private static FlatSVGIcon load(String name, int sizePx) {
+      String fileName = name + ".svg";
+      FlatSVGIcon icon = new FlatSVGIcon(
+        CLASSPATH_DIR + fileName,
+        sizePx,
+        sizePx
+      );
+      if (icon.hasFound()) {
+        return icon;
+      }
+      java.io.File devFile = new java.io.File(DEV_TREE_DIR + fileName);
+      return devFile.exists()
+        ? new FlatSVGIcon(devFile).derive(sizePx, sizePx)
+        : null;
+    }
+  }
+
+  /** Transparent square icon — the absolute last-resort so layout stays stable. */
+  private static final class BlankIcon implements Icon {
+
+    private final int size;
+
+    private BlankIcon(int size) {
+      this.size = size;
+    }
+
+    @Override
+    public void paintIcon(java.awt.Component c, java.awt.Graphics g, int x, int y) {
+      // intentionally blank
+    }
+
+    @Override
+    public int getIconWidth() {
+      return size;
+    }
+
+    @Override
+    public int getIconHeight() {
+      return size;
+    }
+  }
+
   // </editor-fold>
 }

@@ -23,12 +23,18 @@ import java.sql.SQLException;
  *   6. Reset failed-attempt counter on success.
  *   7. Log every attempt to User_Access_Log.
  *   8. Signal MustChangePassword when the flag is set in the DB.
+ *   9. Transparently migrate an out-of-policy BCrypt cost factor (MPH-46).
  *
  * Session establishment is a SEPARATE step (EstablishSession), invoked by the
  * UI at the point the user actually enters the shell. This keeps the
  * must-change-password path (which returns before the shell opens) from
  * creating a premature session, while ensuring both entry paths funnel through
  * one place.
+ *
+ * THREADING: PerformLogin is now called from a SwingWorker background thread
+ * (MPH-46), not the EDT. That is only safe because DatabaseConnector pools
+ * connections (MPH-43) and hands each thread its own; under the old shared
+ * single Connection this would have raced the UI.
  */
 public class LoginProcess implements ILoginProcess {
 
@@ -80,12 +86,47 @@ public class LoginProcess implements ILoginProcess {
             return LoginResult.MustChange(user);
         }
 
+        // MPH-46: cost-factor migration. MUST come after the MustChangePassword
+        // check above — UserDAO.UpdatePasswordHash also sets MustChangePassword = 0,
+        // so re-hashing before that check would silently clear an admin-forced
+        // password reset and the user would never be prompted.
+        MigrateHashIfStale(user, password);
+
         return LoginResult.Success(user);
     }
 
     /**
+     * Re-hashes a verified password when its stored cost factor no longer matches
+     * policy (PasswordService.WORK_FACTOR). Legacy hashes were written at cost 12
+     * (~1250 ms per verify); the policy is now 10 (~310 ms). BCrypt.checkpw reads
+     * the cost from the hash itself, so without this every existing account would
+     * keep paying the old cost forever.
+     *
+     * Runs at most ONCE per account: the next login reads the new hash, NeedsRehash
+     * returns false, and this is a no-op. Best-effort by design — a failure here
+     * must never block a login that has already authenticated, so it is logged and
+     * swallowed. The user simply pays the old cost again next time.
+     */
+    private void MigrateHashIfStale(User user, String plaintextPassword) {
+        try {
+            if (!PasswordService.NeedsRehash(user.GetPasswordHash())) {
+                return;
+            }
+            userDAO.UpdatePasswordHash(
+                user.GetUserId(),
+                PasswordService.Hash(plaintextPassword));
+            System.out.println(
+                "LoginProcess: migrated password hash to the current cost factor for user "
+                + user.GetUserId());
+        } catch (Exception e) {
+            // Non-fatal: authentication already succeeded.
+            System.err.println("LoginProcess.MigrateHashIfStale: " + e.getMessage());
+        }
+    }
+
+    /**
      * Creates the single live session for the user (takeover policy), inside
-     * one transaction on the shared connection — mirrors the
+     * one transaction on a pooled connection — mirrors the
      * BaseMaintenanceProcess.ExecuteAtomic idiom. Returns null on failure so
      * the UI can keep the user on the login screen.
      */

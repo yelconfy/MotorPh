@@ -1,0 +1,20 @@
+!SESSION 2026-07-15 08:17:45.704 -----------------------------------------------
+eclipse.buildId=unknown
+java.version=21.0.10
+java.vendor=Eclipse Adoptium
+BootLoader constants: OS=win32, ARCH=x86_64, WS=win32, NL=en
+Framework arguments:  C:\Users\Rafael Organo\Work\Projects\Personal\Arielle Confesor\NetBeans\MotorPh\scripts\18 - Create Trace Database.sql -eclipse.keyring C:\Users\Rafael Organo\AppData\Roaming\DBeaverData\secure\secure_storage -nosplash
+Command-line arguments:  -os win32 -ws win32 -arch x86_64 C:\Users\Rafael Organo\Work\Projects\Personal\Arielle Confesor\NetBeans\MotorPh\scripts\18 - Create Trace Database.sql -eclipse.keyring C:\Users\Rafael Organo\AppData\Roaming\DBeaverData\secure\secure_storage -nosplash
+
+!ENTRY org.eclipse.ui 2 2 2026-07-15 08:17:53.357
+!MESSAGE Invalid preference category path: org.eclipse.debug.ui.ConsolePreferencePage (bundle: org.eclipse.ui.console, page: org.eclipse.ui.internal.console.ansi.preferences.AnsiConsolePreferencePage)
+!SESSION 2026-07-15 08:27:44.493 -----------------------------------------------
+eclipse.buildId=unknown
+java.version=21.0.10
+java.vendor=Eclipse Adoptium
+BootLoader constants: OS=win32, ARCH=x86_64, WS=win32, NL=en
+Framework arguments:  C:\Users\Rafael Organo\Work\Projects\Personal\Arielle Confesor\NetBeans\MotorPh\scripts\11 - Create SQL Login.sql -eclipse.keyring C:\Users\Rafael Organo\AppData\Roaming\DBeaverData\secure\secure_storage -nosplash
+Command-line arguments:  -os win32 -ws win32 -arch x86_64 C:\Users\Rafael Organo\Work\Projects\Personal\Arielle Confesor\NetBeans\MotorPh\scripts\11 - Create SQL Login.sql -eclipse.keyring C:\Users\Rafael Organo\AppData\Roaming\DBeaverData\secure\secure_storage -nosplash
+
+!ENTRY org.eclipse.ui 2 2 2026-07-15 08:27:53.748
+!MESSAGE Invalid preference category path: org.eclipse.debug.ui.ConsolePreferencePage (bundle: org.eclipse.ui.console, page: org.eclipse.ui.internal.console.ansi.preferences.AnsiConsolePreferencePage)
